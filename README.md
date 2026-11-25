@@ -52,3 +52,8 @@ Cài đặt → DepthWallpaper → Xem thử chiều sâu trên ảnh: chọn �
 ## Sửa lỗi văng khi bấm "Chọn ảnh"
 - Trang thử nghiệm kế thừa PSViewController (đúng kiểu cho PSLinkCell), trước đây là UIViewController nên Settings crash khi tạo.
 - Kiểm tra thư viện ảnh có sẵn trước khi mở picker.
+
+## Cập nhật v5
+- Trang thử nghiệm có đồng hồ mô phỏng ở lớp giữa, chủ thể ở lớp trên.
+- Tách nền nhanh hơn: thu nhỏ ảnh còn tối đa 1024px trước khi tách, dùng Balanced thay vì Accurate.
+- Ảnh không có người vẫn tách được nhờ fallback saliency (iOS 13+). iOS 17+ ưu tiên tách vật thể bất kỳ.

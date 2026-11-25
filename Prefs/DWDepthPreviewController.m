@@ -1,9 +1,10 @@
 #import "DWDepthPreviewController.h"
 #import "../Sources/DWDepthEngine.h"
+#import "../Sources/DWRenderer.h"
 
 @interface DWDepthPreviewController () <UIImagePickerControllerDelegate, UINavigationControllerDelegate>
-@property (nonatomic, strong) UIImageView *backView;
-@property (nonatomic, strong) UIImageView *subjectView;
+@property (nonatomic, strong) DWRenderer *renderer;
+@property (nonatomic, strong) UILabel *clockLabel;
 @property (nonatomic, strong) UILabel *status;
 @property (nonatomic, strong) UIButton *pickButton;
 @end
@@ -13,21 +14,26 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"Xem thử chiều sâu";
-    self.navigationItem.title = self.title;
-    self.view.backgroundColor = [UIColor systemBackgroundColor];
+    self.view.backgroundColor = [UIColor blackColor];
 
-    self.backView = [[UIImageView alloc] init];
-    self.subjectView = [[UIImageView alloc] init];
-    for (UIImageView *v in @[self.backView, self.subjectView]) {
-        v.contentMode = UIViewContentModeScaleAspectFit;
-        v.translatesAutoresizingMaskIntoConstraints = NO;
-        [self.view addSubview:v];
-    }
-    self.subjectView.hidden = YES;
+    self.renderer = [[DWRenderer alloc] initWithFrame:CGRectZero];
+    self.renderer.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:self.renderer];
+
+    self.clockLabel = [[UILabel alloc] init];
+    self.clockLabel.text = @"09:41";
+    self.clockLabel.textColor = [UIColor whiteColor];
+    self.clockLabel.textAlignment = NSTextAlignmentCenter;
+    self.clockLabel.font = [UIFont systemFontOfSize:110 weight:UIFontWeightUltraLight];
+    self.clockLabel.adjustsFontSizeToFitWidth = YES;
+    self.clockLabel.minimumScaleFactor = 0.3;
+    [self.renderer.clockSlot addSubview:self.clockLabel];
 
     self.status = [[UILabel alloc] init];
     self.status.numberOfLines = 0;
+    self.status.textColor = [UIColor whiteColor];
     self.status.textAlignment = NSTextAlignmentCenter;
+    self.status.font = [UIFont systemFontOfSize:14];
     self.status.text = @"Chọn một ảnh để xem chiều sâu.";
     self.status.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.status];
@@ -41,23 +47,27 @@
 
     UILayoutGuide *g = self.view.safeAreaLayoutGuide;
     [NSLayoutConstraint activateConstraints:@[
-        [self.backView.topAnchor constraintEqualToAnchor:g.topAnchor constant:12],
-        [self.backView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
-        [self.backView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-        [self.backView.bottomAnchor constraintEqualToAnchor:self.status.topAnchor constant:-12],
-
-        [self.subjectView.topAnchor constraintEqualToAnchor:self.backView.topAnchor],
-        [self.subjectView.leadingAnchor constraintEqualToAnchor:self.backView.leadingAnchor],
-        [self.subjectView.trailingAnchor constraintEqualToAnchor:self.backView.trailingAnchor],
-        [self.subjectView.bottomAnchor constraintEqualToAnchor:self.backView.bottomAnchor],
+        [self.renderer.topAnchor constraintEqualToAnchor:g.topAnchor constant:8],
+        [self.renderer.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
+        [self.renderer.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
+        [self.renderer.bottomAnchor constraintEqualToAnchor:self.status.topAnchor constant:-10],
 
         [self.status.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:16],
         [self.status.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-16],
-        [self.status.bottomAnchor constraintEqualToAnchor:self.pickButton.topAnchor constant:-12],
+        [self.status.heightAnchor constraintGreaterThanOrEqualToConstant:36],
+        [self.status.bottomAnchor constraintEqualToAnchor:self.pickButton.topAnchor constant:-4],
 
         [self.pickButton.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
-        [self.pickButton.bottomAnchor constraintEqualToAnchor:g.bottomAnchor constant:-16],
+        [self.pickButton.bottomAnchor constraintEqualToAnchor:g.bottomAnchor constant:-4],
+        [self.pickButton.heightAnchor constraintEqualToConstant:44],
     ]];
+}
+
+- (void)viewDidLayoutSubviews {
+    [super viewDidLayoutSubviews];
+    CGRect b = self.renderer.clockSlot.bounds;
+    CGFloat w = b.size.width;
+    self.clockLabel.frame = CGRectMake(0, b.size.height * 0.16, w, 130);
 }
 
 - (void)pickImage {
@@ -77,21 +87,22 @@ didFinishPickingMediaWithInfo:(NSDictionary<UIImagePickerControllerInfoKey,id> *
     UIImage *image = info[UIImagePickerControllerOriginalImage];
     if (!image) return;
 
-    self.backView.image = image;
-    self.subjectView.hidden = YES;
+    [self.renderer setBackground:image subject:nil];
+    [self.renderer setClockPushedDown:NO];
     self.status.text = @"Đang tách chủ thể...";
 
     NSData *raw = UIImagePNGRepresentation(image);
+    CFAbsoluteTime t0 = CFAbsoluteTimeGetCurrent();
     [[DWDepthEngine shared] subjectMaskForImage:image data:raw completion:^(UIImage *mask) {
+        CFAbsoluteTime dt = CFAbsoluteTimeGetCurrent() - t0;
         if (!mask) {
-            self.status.text = @"Không tìm thấy chủ thể trong ảnh này. Ảnh vẫn hiển thị bình thường.";
+            self.status.text = @"Không tách được chủ thể trong ảnh này.";
             return;
         }
         UIImage *cutout = [DWDepthEngine cutoutFromImage:image mask:mask];
-        self.subjectView.image = cutout;
-        self.subjectView.hidden = (cutout == nil);
-        self.status.text = cutout ? @"Đã tách chủ thể. Lớp trên là chủ thể, đồng hồ sẽ nằm giữa."
-                                  : @"Tách chủ thể thất bại.";
+        [self.renderer setBackground:image subject:cutout];
+        [self.renderer setClockPushedDown:YES];
+        self.status.text = [NSString stringWithFormat:@"Đã tách chủ thể trong %.1f giây. Đồng hồ nằm giữa nền và chủ thể.", dt];
     }];
 }
 

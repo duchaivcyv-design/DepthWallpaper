@@ -1,13 +1,11 @@
 #import <UIKit/UIKit.h>
 
-NS_ASSUME_NONNULL_BEGIN
-
 @interface DWDepthEngine : NSObject
 
 + (instancetype)shared;
 
 /// Tạo mask chủ thể (trắng = chủ thể). Callback trên main thread.
-/// Có cache PNG theo SHA256 của dữ liệu ảnh trong Library/Caches/DepthWallpaper.
+/// Ảnh được thu nhỏ còn tối đa 1024px để tách nhanh. Có cache PNG theo SHA256 dữ liệu ảnh.
 - (void)subjectMaskForImage:(UIImage *)image
                        data:(NSData *)data
                  completion:(void (^)(UIImage * _Nullable mask))completion;
@@ -16,5 +14,3 @@ NS_ASSUME_NONNULL_BEGIN
 + (UIImage * _Nullable)cutoutFromImage:(UIImage *)image mask:(UIImage *)mask;
 
 @end
-
-NS_ASSUME_NONNULL_END
