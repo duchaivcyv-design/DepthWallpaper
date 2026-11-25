@@ -16,12 +16,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fix libtinfo dependency with patchelf
+      - name: Install iOS toolchain for Linux (clang + ld64)
         run: |
-          sudo apt-get update
+          mkdir -p "$THEOS/toolchain/linux/iphone"
+          curl -L -o toolchain.tar.lzma \
+            https://github.com/sbingner/llvm-project/releases/latest/download/linux-ios-arm64e-clang-toolchain.tar.lzma
+          TMP=$(mktemp -d)
+          tar -xf toolchain.tar.lzma -C "$TMP"
+          cp -r "$TMP"/ios-arm64e-clang-toolchain/* "$THEOS/toolchain/linux/iphone/"
+          chmod -R +x "$THEOS/toolchain/linux/iphone/bin" || true
+          rm -rf toolchain.tar.lzma "$TMP"
+
+      # BƯỚC MỚI: Vá lỗi thư viện cho toolchain CŨ
+      - name: Patch toolchain dependencies (libtinfo & libxml2)
+        run: |
           sudo apt-get install -y patchelf
-          # Tìm tất cả các tệp nhị phân trong toolchain và thay đổi thư viện liên kết
-          find "$THEOS/toolchain/linux/iphone/bin" -type f -executable -exec patchelf --replace-needed libtinfo.so.5 libtinfo.so.6 {} \;
+          # Sửa lỗi libtinfo.so.5 -> libtinfo.so.6
+          find "$THEOS/toolchain/linux/iphone/bin" -type f -executable -exec patchelf --replace-needed libtinfo.so.5 libtinfo.so.6 {} \; || true
+          # Sửa lỗi libxml2.so.2 -> libxml2.so.16
+          find "$THEOS/toolchain/linux/iphone/bin" -type f -executable -exec patchelf --replace-needed libxml2.so.2 libxml2.so.16 {} \; || true
   
       - name: Install system packages
         run: |
