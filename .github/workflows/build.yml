@@ -16,11 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fix libtinfo.so.5 dependency (Ubuntu 24.04+)
+      - name: Fix libtinfo.so.5 dependency (Symlink)
         run: |
-          wget http://archive.ubuntu.com/ubuntu/pool/universe/n/ncurses/libtinfo5_6.4-2_amd64.deb
-          sudo dpkg -i libtinfo5_6.4-2_amd64.deb
-          rm -f libtinfo5_6.4-2_amd64.deb
+          # Tìm vị trí thư viện libtinfo.so.6 và tạo liên kết tượng trưng
+          sudo ln -sf /usr/lib/x86_64-linux-gnu/libtinfo.so.6 /usr/lib/x86_64-linux-gnu/libtinfo.so.5
+          sudo ldconfig
   
       - name: Install system packages
         run: |
