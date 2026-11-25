@@ -36,3 +36,15 @@ make clean package FINALPACKAGE=1 DEBUG=0 THEOS_PACKAGE_SCHEME=roothide
 - Độ giống iOS 26 99–100% không đảm bảo bằng code: iOS 26 dùng depth map do hệ thống tạo sẵn. Cần depth thật và tinh chỉnh viền mask.
 - Hình nền động/video chưa có pipeline theo khung hình.
 - Vị trí đồng hồ giữa lớp chiều sâu là giả định cần xác nhận trên máy thật.
+
+## Cập nhật sửa lỗi
+- Công tắc có hiệu lực ngay: DWPrefs đọc trực tiếp từ domain com.dj.depthwallpaper, không cache; nhận thông báo com.dj.depthwallpaper/reload để áp lại.
+- Hook luôn được gắn khi tìm thấy class; công tắc kiểm tra lúc chạy, không cần respring để bật/tắt.
+- Filter thêm com.apple.PosterBoard để dò class trình chỉnh sửa hình nền (3 chấm). Log: /var/mobile/Library/Logs/DepthWallpaper/resolved-<process>.txt và classes-<process>-<iOS>.txt.
+- Chưa xác nhận được tên class của nút 3 chấm và mục "Chiều sâu" trong PosterBoard. Cần file classes-PosterBoard-*.txt từ máy để hook đúng.
+
+## Trang thử nghiệm trong Cài đặt
+Cài đặt → DepthWallpaper → Xem thử chiều sâu trên ảnh: chọn ảnh từ thư viện, tách chủ thể bằng Vision và xem lớp chiều sâu. Dùng để kiểm tra độ chính xác của mask trên ảnh bất kỳ.
+
+## Còn thiếu
+- Mục chiều sâu ngay trong menu 3 chấm của trình chỉnh sửa hình nền (PosterBoard): cần tên class/selector thật từ log PosterBoard.

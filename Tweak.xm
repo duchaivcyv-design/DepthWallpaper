@@ -5,7 +5,7 @@
 #import "Sources/DWRenderer.h"
 #import "Sources/DWClassResolver.h"
 
-// Khai báo placeholder để Logos biên dịch. Class thật được gắn lúc chạy qua %init(..., Name = cls).
+// Placeholder để Logos biên dịch. Class thật được gắn lúc chạy qua %init(..., Name = cls).
 @interface SBFWallpaperView : UIView @end
 @interface SBFLockScreenDateView : UIView @end
 @interface NCNotificationCenterViewController : UIViewController @end
@@ -15,12 +15,13 @@ static Class gDateCls;
 static Class gNCCls;
 
 static DWRenderer *gRenderer;
-static UIImage *gSourceImage;   // ảnh gốc đang dùng
-static UIImage *gCutout;        // chủ thể đã cắt
+static UIView *gDateView;          // đồng hồ đang được đưa vào lớp giữa
+static UIView *gDateOriginalSuper; // nơi đồng hồ thuộc về trước khi đổi
+static UIImage *gSourceImage;
 static BOOL gDepthOn = YES;
 static BOOL gBusy = NO;
+static BOOL gJitterDisabledByUs = NO;
 
-// ---------- Gọi selector an toàn (không crash nếu không tồn tại) ----------
 static void DWSendDouble(id obj, NSString *selName, double v) {
     SEL sel = NSSelectorFromString(selName);
     if ([obj respondsToSelector:sel]) ((void (*)(id, SEL, double))objc_msgSend)(obj, sel, v);
@@ -37,7 +38,20 @@ static UIImage *DWImageFromWallpaperView(id view) {
     return ((UIImage *(*)(id, SEL))objc_msgSend)(view, sel);
 }
 
-// ---------- Áp dụng chiều sâu cho một ảnh ----------
+// Trả đồng hồ về chỗ cũ và ẩn lớp chiều sâu.
+static void DWTearDownDepth(void) {
+    if (gDateView && gDateOriginalSuper && gDateView.superview != gDateOriginalSuper) {
+        [gDateOriginalSuper addSubview:gDateView];
+    }
+    gDateView = nil;
+    gDateOriginalSuper = nil;
+    if (gRenderer) {
+        [gRenderer removeFromSuperview];
+        gRenderer = nil;
+    }
+    gSourceImage = nil;
+}
+
 static void DWApplyDepth(UIImage *image, UIView *host) {
     if (!image || !host || gBusy) return;
     if (image == gSourceImage) return;
@@ -48,19 +62,27 @@ static void DWApplyDepth(UIImage *image, UIView *host) {
     gBusy = YES;
     gSourceImage = image;
 
-    [[DWDepthEngine shared] subjectMaskForImage:image data:raw completion:^(UIImage * _Nullable mask) {
+    [[DWDepthEngine shared] subjectMaskForImage:image data:raw completion:^(UIImage *mask) {
         gBusy = NO;
-        if (!DWPrefBool(@"depthWallpaper", YES)) return;
+        if (!DWPrefBool(@"enabled", YES) || !DWPrefBool(@"depthWallpaper", YES)) {
+            DWTearDownDepth();
+            return;
+        }
 
-        gCutout = mask ? [DWDepthEngine cutoutFromImage:image mask:mask] : nil;
+        UIImage *cutout = mask ? [DWDepthEngine cutoutFromImage:image mask:mask] : nil;
 
         if (!gRenderer) {
             gRenderer = [[DWRenderer alloc] initWithFrame:host.bounds];
             gRenderer.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
             [host insertSubview:gRenderer atIndex:0];
         }
-        [gRenderer setBackground:image subject:gCutout];
+        [gRenderer setBackground:image subject:cutout];
         [gRenderer setClockPushedDown:gDepthOn];
+
+        if (gDateView && gDateView.superview != gRenderer.clockSlot) {
+            if (!gDateOriginalSuper) gDateOriginalSuper = gDateView.superview;
+            [gRenderer.clockSlot addSubview:gDateView];
+        }
     }];
 }
 
@@ -72,13 +94,21 @@ static void DWApplyDepth(UIImage *image, UIView *host) {
 - (void)layoutSubviews {
     %orig;
 
-    if (DWPrefBool(@"noJitter", YES)) {
+    BOOL enabled = DWPrefBool(@"enabled", YES);
+
+    if (enabled && DWPrefBool(@"noJitter", YES)) {
         DWSendDouble(self, @"setZoomFactor:", 1.0);
         DWSendBool(self, @"setParallaxEnabled:", NO);
+        gJitterDisabledByUs = YES;
+    } else if (gJitterDisabledByUs) {
+        DWSendBool(self, @"setParallaxEnabled:", YES);
+        gJitterDisabledByUs = NO;
     }
 
-    if (DWPrefBool(@"depthWallpaper", YES)) {
+    if (enabled && DWPrefBool(@"depthWallpaper", YES)) {
         DWApplyDepth(DWImageFromWallpaperView(self), (UIView *)self);
+    } else if (gRenderer) {
+        DWTearDownDepth();
     }
 }
 
@@ -86,16 +116,18 @@ static void DWApplyDepth(UIImage *image, UIView *host) {
 
 %end
 
-// ---------- Nhóm 2: đưa đồng hồ vào lớp giữa ----------
+// ---------- Nhóm 2: đồng hồ vào lớp giữa ----------
 %group DateHooks
 
 %hook SBFLockScreenDateView
 
 - (void)didMoveToSuperview {
     %orig;
-    if (!DWPrefBool(@"depthWallpaper", YES)) return;
+    if (!DWPrefBool(@"enabled", YES) || !DWPrefBool(@"depthWallpaper", YES)) return;
     UIView *selfView = (UIView *)self;
+    gDateView = selfView;
     if (gRenderer && gRenderer.clockSlot && selfView.superview != gRenderer.clockSlot) {
+        if (!gDateOriginalSuper) gDateOriginalSuper = selfView.superview;
         [gRenderer.clockSlot addSubview:selfView];
     }
 }
@@ -104,7 +136,7 @@ static void DWApplyDepth(UIImage *image, UIView *host) {
 
 %end
 
-// ---------- Nhóm 3: nhấn giữ trung tâm thông báo để bật/tắt chiều sâu ----------
+// ---------- Nhóm 3: nhấn giữ trung tâm thông báo để bật/tắt đẩy đồng hồ ----------
 %group ToggleHooks
 
 %hook NCNotificationCenterViewController
@@ -121,6 +153,7 @@ static void DWApplyDepth(UIImage *image, UIView *host) {
 %new
 - (void)dw_longPress:(UILongPressGestureRecognizer *)g {
     if (g.state != UIGestureRecognizerStateBegan) return;
+    if (!DWPrefBool(@"enabled", YES) || !DWPrefBool(@"depthToggle", YES)) return;
     gDepthOn = !gDepthOn;
     if (gRenderer) [gRenderer setClockPushedDown:gDepthOn];
 }
@@ -129,27 +162,40 @@ static void DWApplyDepth(UIImage *image, UIView *host) {
 
 %end
 
-%ctor {
-    if (!DWPrefBool(@"enabled", YES)) return;
+// ---------- Áp lại cài đặt ngay khi công tắc thay đổi ----------
+static void DWReloadFromPrefs(CFNotificationCenterRef center, void *observer,
+                              CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+    CFPreferencesAppSynchronize((__bridge CFStringRef)DW_PREFS_SUITE);
+    if (!DWPrefBool(@"enabled", YES) || !DWPrefBool(@"depthWallpaper", YES)) {
+        dispatch_async(dispatch_get_main_queue(), ^{ DWTearDownDepth(); });
+    } else {
+        gSourceImage = nil; // buộc layoutSubviews áp dụng lại
+    }
+    gDepthOn = YES;
+}
 
+%ctor {
     DWDumpRelevantClassesOnce();
 
-        // 1. Wallpaper view (ảnh nền)
+    CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL,
+                                    DWReloadFromPrefs, CFSTR(DW_RELOAD_NOTE), NULL,
+                                    CFNotificationSuspensionBehaviorDeliverImmediately);
+
     gWallpaperCls = DWFindClass(@[@"SBFStaticWallpaperView", @"SBFWallpaperView"],
                                 @"WallpaperView", @"wallpaperImage", [UIView class],
                                 @"wallpaper");
 
-    // 2. Đồng hồ / ngày giờ trên Lock Screen (ưu tiên CSLockScreenDateView trước SBFLockScreenDateView)
     gDateCls = DWFindClass(@[@"CSLockScreenDateView", @"SBFLockScreenDateView"],
                            @"LockScreenDateView", @"didMoveToSuperview", [UIView class],
                            @"date");
 
-    // 3. CoverSheet / Notification Center để gắn gesture nhấn giữ bật-tắt chiều sâu
-    gNCCls = DWFindClass(@[@"CSCoverSheetViewController", @"NCNotificationCenterViewController", @"SBNotificationCenterViewController"],
+    gNCCls = DWFindClass(@[@"CSCoverSheetViewController", @"NCNotificationCenterViewController",
+                           @"SBNotificationCenterViewController"],
                          @"CoverSheetOrNC", @"viewDidLoad", [UIViewController class],
                          @"notification-center");
 
+    // Luôn gắn hook khi tìm thấy class; mỗi hook tự kiểm tra công tắc lúc chạy.
     if (gWallpaperCls) %init(WallpaperHooks, SBFWallpaperView = gWallpaperCls);
-    if (gDateCls && DWPrefBool(@"depthWallpaper", YES)) %init(DateHooks, SBFLockScreenDateView = gDateCls);
-    if (gNCCls && DWPrefBool(@"depthToggle", YES)) %init(ToggleHooks, NCNotificationCenterViewController = gNCCls);
+    if (gDateCls)      %init(DateHooks, SBFLockScreenDateView = gDateCls);
+    if (gNCCls)        %init(ToggleHooks, NCNotificationCenterViewController = gNCCls);
 }

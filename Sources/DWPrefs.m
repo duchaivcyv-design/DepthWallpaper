@@ -1,13 +1,21 @@
 #import "DWPrefs.h"
 
-static NSString *const kDWSuite = @"com.dj.depthwallpaper";
-
+// Đọc trực tiếp từ domain plist mỗi lần gọi (không cache), để công tắc có tác dụng ngay.
 BOOL DWPrefBool(NSString *key, BOOL defaultValue) {
-    static NSUserDefaults *defaults;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        defaults = [[NSUserDefaults alloc] initWithSuiteName:kDWSuite];
-    });
-    id value = [defaults objectForKey:key];
-    return value ? [defaults boolForKey:key] : defaultValue;
+    CFStringRef suite = (__bridge CFStringRef)DW_PREFS_SUITE;
+    CFPreferencesAppSynchronize(suite);
+    CFPropertyListRef value = CFPreferencesCopyAppValue((__bridge CFStringRef)key, suite);
+    if (!value) return defaultValue;
+
+    BOOL result = defaultValue;
+    CFTypeID type = CFGetTypeID(value);
+    if (type == CFBooleanGetTypeID()) {
+        result = CFBooleanGetValue((CFBooleanRef)value);
+    } else if (type == CFNumberGetTypeID()) {
+        int n = 0;
+        CFNumberGetValue((CFNumberRef)value, kCFNumberIntType, &n);
+        result = (n != 0);
+    }
+    CFRelease(value);
+    return result;
 }
