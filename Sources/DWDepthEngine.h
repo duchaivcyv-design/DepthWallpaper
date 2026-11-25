@@ -1,5 +1,7 @@
 #import <UIKit/UIKit.h>
 
+NS_ASSUME_NONNULL_BEGIN
+
 @interface DWDepthEngine : NSObject
 
 + (instancetype)shared;
@@ -14,3 +16,5 @@
 + (UIImage * _Nullable)cutoutFromImage:(UIImage *)image mask:(UIImage *)mask;
 
 @end
+
+NS_ASSUME_NONNULL_END
