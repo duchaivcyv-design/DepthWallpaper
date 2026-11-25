@@ -71,13 +71,15 @@
         }
 #endif
 
-        if (!handled) {
-            VNGeneratePersonSegmentationRequest *req = [VNGeneratePersonSegmentationRequest new];
-            req.qualityLevel = VNGeneratePersonSegmentationRequestQualityLevelAccurate;
-            NSError *err = nil;
-            if ([handler performRequests:@[req] error:&err]) {
-                VNPixelBufferObservation *obs = req.results.firstObject;
-                maskBuffer = obs.pixelBuffer; // không sở hữu
+                if (!handled) {
+            if (@available(iOS 15.0, *)) {
+                VNGeneratePersonSegmentationRequest *req = [VNGeneratePersonSegmentationRequest new];
+                req.qualityLevel = VNGeneratePersonSegmentationRequestQualityLevelAccurate;
+                NSError *err = nil;
+                if ([handler performRequests:@[req] error:&err]) {
+                    VNPixelBufferObservation *obs = req.results.firstObject;
+                    maskBuffer = obs.pixelBuffer; // không sở hữu
+                }
             }
         }
 
