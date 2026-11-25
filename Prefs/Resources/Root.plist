@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>items</key>
+    <array>
+        <dict><key>cell</key><string>PSGroupCell</string><key>label</key><string>Chung</string></dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>Bật DepthWallpaper</string>
+            <key>key</key><string>enabled</string>
+            <key>default</key><true/>
+            <key>defaults</key><string>com.dj.depthwallpaper</string>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>Ghi danh sách class để dò (một lần mỗi iOS)</string>
+            <key>key</key><string>dumpClasses</string>
+            <key>default</key><true/>
+            <key>defaults</key><string>com.dj.depthwallpaper</string>
+        </dict>
+        <dict><key>cell</key><string>PSGroupCell</string><key>label</key><string>Hình nền</string></dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>Hiệu ứng chiều sâu</string>
+            <key>key</key><string>depthWallpaper</string>
+            <key>default</key><true/>
+            <key>defaults</key><string>com.dj.depthwallpaper</string>
+        </dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>Tắt rung khi vuốt trang chủ</string>
+            <key>key</key><string>noJitter</string>
+            <key>default</key><true/>
+            <key>defaults</key><string>com.dj.depthwallpaper</string>
+        </dict>
+        <dict><key>cell</key><string>PSGroupCell</string><key>label</key><string>Trung tâm thông báo</string></dict>
+        <dict>
+            <key>cell</key><string>PSSwitchCell</string>
+            <key>label</key><string>Nhấn giữ để bật/tắt đẩy đồng hồ</string>
+            <key>key</key><string>depthToggle</string>
+            <key>default</key><true/>
+            <key>defaults</key><string>com.dj.depthwallpaper</string>
+        </dict>
+    </array>
+    <key>title</key><string>DepthWallpaper</string>
+</dict>
+</plist>

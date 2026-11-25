@@ -1,0 +1,8 @@
+Package: com.dj.depthwallpaper
+Name: DepthWallpaper
+Version: 0.0.1-test-nah
+Maintainer: dj, TaoJB
+Author: dj, TaoJB
+Section: Tweaks
+Depends: mobilesubstrate, preferenceloader, firmware (>= 16.0), firmware (<< 19.0)
+Description: Depth wallpaper effect for iOS 16 - 18 (rootless + roothide).

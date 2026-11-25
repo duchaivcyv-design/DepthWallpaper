@@ -1,0 +1,10 @@
+{
+    entry = {
+        cell = PSLinkListCell;
+        detail = PSListItemsController;
+        isController = 1;
+        label = "DepthWallpaper";
+        bundle = "DepthWallpaperPrefs";
+        defaults = "com.dj.depthwallpaper";
+    };
+}
