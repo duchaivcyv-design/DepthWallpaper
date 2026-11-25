@@ -16,6 +16,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Fix libtinfo.so.5 dependency (fallback)
+        run: |
+          sudo ln -sf /usr/lib/x86_64-linux-gnu/libtinfo.so.6 /usr/lib/x86_64-linux-gnu/libtinfo.so.5
+          sudo ldconfig
+  
       - name: Install system packages
         run: |
           sudo apt-get update
