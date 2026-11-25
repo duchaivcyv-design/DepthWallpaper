@@ -1,6 +1,5 @@
 #import "DWDepthPreviewController.h"
 #import "../Sources/DWDepthEngine.h"
-#import <PhotosUI/PhotosUI.h>
 
 @interface DWDepthPreviewController () <UIImagePickerControllerDelegate, UINavigationControllerDelegate>
 @property (nonatomic, strong) UIImageView *backView;
@@ -14,6 +13,7 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"Xem thử chiều sâu";
+    self.navigationItem.title = self.title;
     self.view.backgroundColor = [UIColor systemBackgroundColor];
 
     self.backView = [[UIImageView alloc] init];
@@ -61,6 +61,10 @@
 }
 
 - (void)pickImage {
+    if (![UIImagePickerController isSourceTypeAvailable:UIImagePickerControllerSourceTypePhotoLibrary]) {
+        self.status.text = @"Thiết bị không cho phép mở thư viện ảnh.";
+        return;
+    }
     UIImagePickerController *picker = [[UIImagePickerController alloc] init];
     picker.sourceType = UIImagePickerControllerSourceTypePhotoLibrary;
     picker.delegate = self;

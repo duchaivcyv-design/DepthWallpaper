@@ -48,3 +48,7 @@ Cài đặt → DepthWallpaper → Xem thử chiều sâu trên ảnh: chọn �
 
 ## Còn thiếu
 - Mục chiều sâu ngay trong menu 3 chấm của trình chỉnh sửa hình nền (PosterBoard): cần tên class/selector thật từ log PosterBoard.
+
+## Sửa lỗi văng khi bấm "Chọn ảnh"
+- Trang thử nghiệm kế thừa PSViewController (đúng kiểu cho PSLinkCell), trước đây là UIViewController nên Settings crash khi tạo.
+- Kiểm tra thư viện ảnh có sẵn trước khi mở picker.
