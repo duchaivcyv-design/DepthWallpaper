@@ -20,7 +20,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential coreutils curl git unzip xz-utils \
-            perl tar fakeroot dpkg-dev libssl-dev
+            perl tar fakeroot dpkg-dev libssl-dev \
+            libplist-dev pkg-config
 
       - name: Build ldid from source (không có trong apt Ubuntu 26.04)
         run: |
