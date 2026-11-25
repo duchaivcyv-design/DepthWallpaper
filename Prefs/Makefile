@@ -2,6 +2,7 @@ include $(THEOS)/makefiles/common.mk
 
 BUNDLE_NAME = DepthWallpaperPrefs
 DepthWallpaperPrefs_FILES = DWRootListController.m
+DepthWallpaperPrefs_RESOURCE_DIRS = Resources
 DepthWallpaperPrefs_INSTALL_PATH = /Library/PreferenceBundles
 DepthWallpaperPrefs_FRAMEWORKS = UIKit
 DepthWallpaperPrefs_PRIVATE_FRAMEWORKS = Preferences
