@@ -170,18 +170,36 @@ static const CGFloat kDWMaxSide = 1024.0;
 }
 
 + (UIImage *)cutoutFromImage:(UIImage *)image mask:(UIImage *)mask {
+    return [self cutoutFromImage:image mask:mask thickness:0.0];
+}
+
++ (UIImage *)cutoutFromImage:(UIImage *)image mask:(UIImage *)mask thickness:(double)thickness {
     if (!image.CGImage || !mask.CGImage) return nil;
 
     CIImage *src = [CIImage imageWithCGImage:image.CGImage];
-    CIImage *m = [[CIImage imageWithCGImage:mask.CGImage] imageByApplyingFilter:@"CIMaskToAlpha"];
+    CIImage *m = [CIImage imageWithCGImage:mask.CGImage];
+    CGRect extent = src.extent;
+
+    double t = MAX(-1.0, MIN(1.0, thickness));
+    CGFloat radius = (CGFloat)fabs(t) * 12.0;
+    if (radius >= 0.5) {
+        NSString *filter = (t > 0) ? @"CIMorphologyMaximum" : @"CIMorphologyMinimum";
+        CIFilter *morph = [CIFilter filterWithName:filter];
+        [morph setValue:m forKey:kCIInputImageKey];
+        [morph setValue:@(radius) forKey:kCIInputRadiusKey];
+        if (morph.outputImage) m = [morph.outputImage imageByCroppingToRect:extent];
+    }
+
+    m = [m imageByApplyingFilter:@"CIMaskToAlpha"];
 
     CIFilter *blend = [CIFilter filterWithName:@"CIBlendWithMask"];
     [blend setValue:src forKey:kCIInputImageKey];
     [blend setValue:[CIImage emptyImage] forKey:kCIInputBackgroundImageKey];
     [blend setValue:m forKey:kCIInputMaskImageKey];
+    if (!blend.outputImage) return nil;
 
     CGImageRef out = [[CIContext contextWithOptions:nil] createCGImage:blend.outputImage
-                                                              fromRect:src.extent];
+                                                              fromRect:extent];
     if (!out) return nil;
     UIImage *img = [UIImage imageWithCGImage:out scale:image.scale orientation:UIImageOrientationUp];
     CGImageRelease(out);

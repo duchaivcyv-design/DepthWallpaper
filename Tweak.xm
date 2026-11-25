@@ -69,7 +69,8 @@ static void DWApplyDepth(UIImage *image, UIView *host) {
             return;
         }
 
-        UIImage *cutout = mask ? [DWDepthEngine cutoutFromImage:image mask:mask] : nil;
+        UIImage *cutout = mask ? [DWDepthEngine cutoutFromImage:image mask:mask
+                                                             thickness:DWPrefDouble(@"subjectThickness", 0.0)] : nil;
 
         if (!gRenderer) {
             gRenderer = [[DWRenderer alloc] initWithFrame:host.bounds];

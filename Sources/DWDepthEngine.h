@@ -15,6 +15,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// Cắt chủ thể ra PNG có alpha bằng mask. Trả về nil nếu thất bại.
 + (nullable UIImage *)cutoutFromImage:(UIImage *)image mask:(UIImage *)mask;
 
+/// Cắt có độ dày chủ thể. thickness trong [-1, 1]: >0 làm dày ra (dilate), <0 làm mỏng lại (erode).
++ (nullable UIImage *)cutoutFromImage:(UIImage *)image
+                                 mask:(UIImage *)mask
+                            thickness:(double)thickness;
+
 @end
 
 NS_ASSUME_NONNULL_END

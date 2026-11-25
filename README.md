@@ -57,3 +57,9 @@ Cài đặt → DepthWallpaper → Xem thử chiều sâu trên ảnh: chọn �
 - Trang thử nghiệm có đồng hồ mô phỏng ở lớp giữa, chủ thể ở lớp trên.
 - Tách nền nhanh hơn: thu nhỏ ảnh còn tối đa 1024px trước khi tách, dùng Balanced thay vì Accurate.
 - Ảnh không có người vẫn tách được nhờ fallback saliency (iOS 13+). iOS 17+ ưu tiên tách vật thể bất kỳ.
+
+## Cập nhật v7
+- Trang xem thử: đồng hồ có ngày và giờ 9:41, kéo để di chuyển, vị trí được lưu.
+- Góc trắng trên đồng hồ: kéo lên xuống để tăng/giảm độ dày chủ thể. Giá trị lưu vào `subjectThickness` (-1 đến +1), tweak cũng dùng giá trị này.
+- Thanh trượt "Độ dày chủ thể" trong Cài đặt chỉnh cùng giá trị.
+- Log class thật (iOS 16.7.16) xác nhận: SBFWallpaperView, SBFLockScreenDateView, CSCoverSheetViewController, PRPosterDepthEffectConfiguration. Selector của menu Depth vẫn chưa xác nhận được.
