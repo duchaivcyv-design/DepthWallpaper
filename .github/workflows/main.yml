@@ -15,7 +15,6 @@ on:
         options:
           - all
           - rootless
-          - rootful
           - roothide
 
 jobs:
@@ -29,7 +28,7 @@ jobs:
         run: |
           SCHEME="${{ github.event.inputs.scheme }}"
           if [ -z "$SCHEME" ] || [ "$SCHEME" = "all" ]; then
-            echo 'matrix=["rootless","rootful","roothide"]' >> $GITHUB_OUTPUT
+            echo 'matrix=["rootless","roothide"]' >> $GITHUB_OUTPUT
           else
             echo "matrix=[\"$SCHEME\"]" >> $GITHUB_OUTPUT
           fi
@@ -63,16 +62,16 @@ jobs:
         uses: actions/cache@v4
         with:
           path: theos/sdks
-          key: theos-sdks-16.5
+          key: theos-sdks-16.5-v2
 
       - name: download sdks
         if: steps.cache-sdks.outputs.cache-hit != 'true'
         run: |
-          curl -LO https://github.com/theos/sdks/archive/master.zip
-          unzip -q master.zip
+          curl -fsSL https://github.com/theos/sdks/archive/refs/heads/master.zip -o master.zip
+          ditto -xk master.zip extracted_sdks
           mkdir -p theos/sdks
-          mv sdks-master/*.sdk theos/sdks/
-          rm -rf master.zip sdks-master
+          find extracted_sdks -maxdepth 2 -name "*.sdk" -exec mv {} theos/sdks/ \;
+          rm -rf master.zip extracted_sdks
 
       - name: set THEOS env var
         run: echo "THEOS=$GITHUB_WORKSPACE/theos" >> $GITHUB_ENV
