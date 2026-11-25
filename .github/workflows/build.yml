@@ -16,34 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install iOS toolchain for Linux (clang + ld64)
-        run: |
-          mkdir -p "$THEOS/toolchain/linux/iphone"
-          curl -L -o toolchain.tar.lzma \
-            https://github.com/sbingner/llvm-project/releases/latest/download/linux-ios-arm64e-clang-toolchain.tar.lzma
-          TMP=$(mktemp -d)
-          tar -xf toolchain.tar.lzma -C "$TMP"
-          cp -r "$TMP"/ios-arm64e-clang-toolchain/* "$THEOS/toolchain/linux/iphone/"
-          chmod -R +x "$THEOS/toolchain/linux/iphone/bin" || true
-          rm -rf toolchain.tar.lzma "$TMP"
-
-      # BƯỚC MỚI: Vá lỗi thư viện cho toolchain CŨ
-      - name: Patch toolchain dependencies (libtinfo & libxml2)
-        run: |
-          sudo apt-get install -y patchelf
-          # Sửa lỗi libtinfo.so.5 -> libtinfo.so.6
-          find "$THEOS/toolchain/linux/iphone/bin" -type f -executable -exec patchelf --replace-needed libtinfo.so.5 libtinfo.so.6 {} \; || true
-          # Sửa lỗi libxml2.so.2 -> libxml2.so.16
-          find "$THEOS/toolchain/linux/iphone/bin" -type f -executable -exec patchelf --replace-needed libxml2.so.2 libxml2.so.16 {} \; || true
-  
       - name: Install system packages
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential coreutils curl git unzip xz-utils \
-            perl tar fakeroot dpkg-dev libssl-dev \
-            libplist-dev pkg-config
+            perl tar fakeroot dpkg-dev libssl-dev libplist-dev pkg-config
 
-      - name: Build ldid from source (không có trong apt Ubuntu 26.04)
+      - name: Build ldid from source
         run: |
           git clone --recursive --depth 1 https://github.com/ProcursusTeam/ldid.git ldid-src
           make -C ldid-src -j"$(nproc)"
@@ -52,6 +31,7 @@ jobs:
 
       - name: Install roothide/theos
         run: |
+          rm -rf "$THEOS"
           git clone --recursive --depth 1 https://github.com/roothide/theos.git "$THEOS"
 
       - name: Install iOS toolchain for Linux (clang + ld64)
@@ -64,6 +44,14 @@ jobs:
           cp -r "$TMP"/ios-arm64e-clang-toolchain/* "$THEOS/toolchain/linux/iphone/"
           chmod -R +x "$THEOS/toolchain/linux/iphone/bin" || true
           rm -rf toolchain.tar.lzma "$TMP"
+
+      - name: Patch toolchain dependencies (libtinfo & libxml2)
+        run: |
+          sudo apt-get install -y patchelf
+          # Sửa lỗi libtinfo.so.5 -> libtinfo.so.6
+          find "$THEOS/toolchain/linux/iphone/bin" -type f -executable -exec patchelf --replace-needed libtinfo.so.5 libtinfo.so.6 {} \; || true
+          # Sửa lỗi libxml2.so.2 -> libxml2.so.16
+          find "$THEOS/toolchain/linux/iphone/bin" -type f -executable -exec patchelf --replace-needed libxml2.so.2 libxml2.so.16 {} \; || true
 
       - name: Install iOS SDK (iPhoneOS 16.5)
         run: |
