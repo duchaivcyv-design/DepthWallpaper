@@ -16,13 +16,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install con cac
+      - name: Install system packages
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential coreutils curl git unzip xz-utils \
-            libtinfo5 perl tar fakeroot dpkg-dev ldid
+            perl tar fakeroot dpkg-dev libssl-dev
 
-      - name: Install roothide lương khô
+      - name: Build ldid from source (không có trong apt Ubuntu 26.04)
+        run: |
+          git clone --recursive --depth 1 https://github.com/ProcursusTeam/ldid.git ldid-src
+          make -C ldid-src -j"$(nproc)"
+          sudo install -m 755 ldid-src/ldid /usr/local/bin/ldid
+          ldid -h 2>&1 | head -n 1 || true
+
+      - name: Install roothide/theos
         run: |
           git clone --recursive --depth 1 https://github.com/roothide/theos.git "$THEOS"
 
