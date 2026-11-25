@@ -12,5 +12,5 @@ DepthWallpaper_FRAMEWORKS = UIKit Vision CoreImage QuartzCore
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 
-SUBPROJECTS += prefs
+SUBPROJECTS += Prefs
 include $(THEOS_MAKE_PATH)/aggregate.mk
