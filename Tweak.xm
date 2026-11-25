@@ -48,7 +48,7 @@ static void DWApplyDepth(UIImage *image, UIView *host) {
     gBusy = YES;
     gSourceImage = image;
 
-    [[DWDepthEngine shared] subjectMaskForImage:image data:raw completion:^(UIImage *mask) {
+    [[DWDepthEngine shared] subjectMaskForImage:image data:raw completion:^(UIImage * _Nullable mask) {
         gBusy = NO;
         if (!DWPrefBool(@"depthWallpaper", YES)) return;
 
@@ -78,7 +78,7 @@ static void DWApplyDepth(UIImage *image, UIView *host) {
     }
 
     if (DWPrefBool(@"depthWallpaper", YES)) {
-        DWApplyDepth(DWImageFromWallpaperView(self), self);
+        DWApplyDepth(DWImageFromWallpaperView(self), (UIView *)self);
     }
 }
 
@@ -94,8 +94,9 @@ static void DWApplyDepth(UIImage *image, UIView *host) {
 - (void)didMoveToSuperview {
     %orig;
     if (!DWPrefBool(@"depthWallpaper", YES)) return;
-    if (gRenderer && self.superview != gRenderer.clockSlot) {
-        [gRenderer.clockSlot addSubview:self];
+    UIView *selfView = (UIView *)self;
+    if (gRenderer && gRenderer.clockSlot && selfView.superview != gRenderer.clockSlot) {
+        [gRenderer.clockSlot addSubview:selfView];
     }
 }
 
@@ -110,10 +111,11 @@ static void DWApplyDepth(UIImage *image, UIView *host) {
 
 - (void)viewDidLoad {
     %orig;
+    UIViewController *selfVC = (UIViewController *)self;
     UILongPressGestureRecognizer *lp =
         [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(dw_longPress:)];
     lp.minimumPressDuration = 0.6;
-    [self.view addGestureRecognizer:lp];
+    [selfVC.view addGestureRecognizer:lp];
 }
 
 %new
@@ -132,16 +134,19 @@ static void DWApplyDepth(UIImage *image, UIView *host) {
 
     DWDumpRelevantClassesOnce();
 
-    gWallpaperCls = DWFindClass(@[@"SBFWallpaperView", @"SBFStaticWallpaperView"],
-                                @"WallpaperView", @"setZoomFactor:", [UIView class],
+        // 1. Wallpaper view (ảnh nền)
+    gWallpaperCls = DWFindClass(@[@"SBFStaticWallpaperView", @"SBFWallpaperView"],
+                                @"WallpaperView", @"wallpaperImage", [UIView class],
                                 @"wallpaper");
 
-    gDateCls = DWFindClass(@[@"SBFLockScreenDateView"],
-                           @"LockScreenDateView", @"setDate:", [UIView class],
+    // 2. Đồng hồ / ngày giờ trên Lock Screen (ưu tiên CSLockScreenDateView trước SBFLockScreenDateView)
+    gDateCls = DWFindClass(@[@"CSLockScreenDateView", @"SBFLockScreenDateView"],
+                           @"LockScreenDateView", @"didMoveToSuperview", [UIView class],
                            @"date");
 
-    gNCCls = DWFindClass(@[@"NCNotificationCenterViewController"],
-                         @"NotificationCenter", @"viewDidLoad", [UIViewController class],
+    // 3. CoverSheet / Notification Center để gắn gesture nhấn giữ bật-tắt chiều sâu
+    gNCCls = DWFindClass(@[@"CSCoverSheetViewController", @"NCNotificationCenterViewController", @"SBNotificationCenterViewController"],
+                         @"CoverSheetOrNC", @"viewDidLoad", [UIViewController class],
                          @"notification-center");
 
     if (gWallpaperCls) %init(WallpaperHooks, SBFWallpaperView = gWallpaperCls);
