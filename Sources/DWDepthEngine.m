@@ -52,7 +52,9 @@
         VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
         CVPixelBufferRef maskBuffer = NULL;
         BOOL owned = NO;
+        BOOL handled = NO;
 
+#if defined(__IPHONE_17_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_17_0
         if (@available(iOS 17.0, *)) {
             VNGenerateForegroundInstanceMaskRequest *req = [VNGenerateForegroundInstanceMaskRequest new];
             NSError *err = nil;
@@ -65,12 +67,17 @@
                     owned = (maskBuffer != NULL);
                 }
             }
-        } else {
+            handled = YES;
+        }
+#endif
+
+        if (!handled) {
             VNGeneratePersonSegmentationRequest *req = [VNGeneratePersonSegmentationRequest new];
             req.qualityLevel = VNGeneratePersonSegmentationRequestQualityLevelAccurate;
             NSError *err = nil;
             if ([handler performRequests:@[req] error:&err]) {
-                maskBuffer = req.results.firstObject.pixelBuffer; // không sở hữu
+                VNPixelBufferObservation *obs = req.results.firstObject;
+                maskBuffer = obs.pixelBuffer; // không sở hữu
             }
         }
 
