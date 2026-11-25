@@ -1,6 +1,7 @@
 #import "DWDepthEngine.h"
 #import <Vision/Vision.h>
 #import <CommonCrypto/CommonDigest.h>
+#import <objc/message.h>
 
 static const CGFloat kDWMaxSide = 1024.0;
 
@@ -13,7 +14,7 @@ static const CGFloat kDWMaxSide = 1024.0;
     return engine;
 }
 
-- (NSURL *)cacheDirectory {
++ (NSURL *)cacheDirectory {
     NSURL *caches = [[[NSFileManager defaultManager] URLsForDirectory:NSCachesDirectory
                                                              inDomains:NSUserDomainMask] firstObject];
     NSURL *dir = [caches URLByAppendingPathComponent:@"DepthWallpaper" isDirectory:YES];
@@ -22,26 +23,41 @@ static const CGFloat kDWMaxSide = 1024.0;
     return dir;
 }
 
-- (NSString *)keyForData:(NSData *)data {
++ (NSString *)keyForData:(NSData *)data {
     unsigned char digest[CC_SHA256_DIGEST_LENGTH];
     CC_SHA256(data.bytes, (CC_LONG)data.length, digest);
     NSMutableString *s = [NSMutableString stringWithCapacity:CC_SHA256_DIGEST_LENGTH * 2];
-    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) [s appendFormat:@"%02x", digest[i]];
+    for (int i = 0; i < CC_SHA256_DIGEST_LENGTH; i++) {
+        [s appendFormat:@"%02x", digest[i]];
+    }
     return s;
 }
 
-#pragma mark - Các bước tách mask (trả về CGImage grayscale, trắng = chủ thể, caller tự release)
+#pragma mark - Các bước tách mask (trả về CGImage grayscale, trắng = chủ thể; caller tự release)
 
-// iOS 17+: tách mọi vật thể nổi bật
-+ (CGImageRef)maskWithInstanceMask:(CGImageRef)cg API_AVAILABLE(ios(17.0)) {
-    VNImageRequestHandler *h = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
-    VNGenerateForegroundInstanceMaskRequest *req = [VNGenerateForegroundInstanceMaskRequest new];
-    if (![h performRequests:@[req] error:nil]) return NULL;
-    VNInstanceMaskObservation *obs = req.results.firstObject;
+// iOS 17+: tách mọi vật thể nổi bật. Dùng runtime lookup vì SDK 16.5 chưa khai báo class này.
++ (CGImageRef)maskWithInstanceMask:(CGImageRef)cg {
+    Class reqCls = NSClassFromString(@"VNGenerateForegroundInstanceMaskRequest");
+    if (!reqCls) return NULL;
+
+    VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
+    id req = [[reqCls alloc] init];
+    if (![handler performRequests:@[req] error:nil]) return NULL;
+
+    NSArray *results = [req valueForKey:@"results"];
+    id obs = results.firstObject;
     if (!obs) return NULL;
-    CVPixelBufferRef pb = [obs generateScaledMaskForImageForInstances:obs.allInstances
-                                                  fromRequestHandler:h error:nil];
+
+    SEL genSel = NSSelectorFromString(@"generateScaledMaskForImageForInstances:fromRequestHandler:error:");
+    if (![obs respondsToSelector:genSel]) return NULL;
+    NSIndexSet *allInstances = [obs valueForKey:@"allInstances"];
+    if (!allInstances) return NULL;
+
+    NSError *err = nil;
+    CVPixelBufferRef pb = ((CVPixelBufferRef (*)(id, SEL, NSIndexSet *, id, NSError **))objc_msgSend)(
+        obs, genSel, allInstances, handler, &err);
     if (!pb) return NULL;
+
     CIImage *ci = [CIImage imageWithCVPixelBuffer:pb];
     CGImageRef out = [[CIContext contextWithOptions:nil] createCGImage:ci fromRect:ci.extent];
     CVPixelBufferRelease(pb);
@@ -50,25 +66,28 @@ static const CGFloat kDWMaxSide = 1024.0;
 
 // iOS 15+: người
 + (CGImageRef)maskWithPersonSegmentation:(CGImageRef)cg {
-    VNImageRequestHandler *h = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
-    VNGeneratePersonSegmentationRequest *req = [VNGeneratePersonSegmentationRequest new];
-    req.qualityLevel = VNGeneratePersonSegmentationRequestQualityLevelBalanced;
-    if (![h performRequests:@[req] error:nil]) return NULL;
-    CVPixelBufferRef pb = req.results.firstObject.pixelBuffer;
-    if (!pb) return NULL;
-    CIImage *ci = [CIImage imageWithCVPixelBuffer:pb];
-    return [[CIContext contextWithOptions:nil] createCGImage:ci fromRect:ci.extent];
+    if (@available(iOS 15.0, *)) {
+        VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
+        VNGeneratePersonSegmentationRequest *req = [VNGeneratePersonSegmentationRequest new];
+        req.qualityLevel = VNGeneratePersonSegmentationRequestQualityLevelBalanced;
+        if (![handler performRequests:@[req] error:nil]) return NULL;
+        CVPixelBufferRef pb = req.results.firstObject.pixelBuffer;
+        if (!pb) return NULL;
+        CIImage *ci = [CIImage imageWithCVPixelBuffer:pb];
+        return [[CIContext contextWithOptions:nil] createCGImage:ci fromRect:ci.extent];
+    }
+    return NULL;
 }
 
 // iOS 13+: vùng nổi bật theo saliency, dùng cho ảnh không có người
 + (CGImageRef)maskWithSaliency:(CGImageRef)cg {
-    VNImageRequestHandler *h = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
+    VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
     VNGenerateAttentionBasedSaliencyImageRequest *req = [VNGenerateAttentionBasedSaliencyImageRequest new];
-    if (![h performRequests:@[req] error:nil]) return NULL;
+    if (![handler performRequests:@[req] error:nil]) return NULL;
     CVPixelBufferRef pb = req.results.firstObject.pixelBuffer;
     if (!pb) return NULL;
+
     CIImage *ci = [CIImage imageWithCVPixelBuffer:pb];
-    // Tăng tương phản quanh 0.5 để tạo mask nhị phân gần đúng
     CIFilter *f = [CIFilter filterWithName:@"CIColorControls"];
     [f setValue:ci forKey:kCIInputImageKey];
     [f setValue:@(4.0) forKey:kCIInputContrastKey];
@@ -79,8 +98,7 @@ static const CGFloat kDWMaxSide = 1024.0;
 // Thu nhỏ ảnh để tách nhanh
 + (CGImageRef)downscaledCGImage:(CGImageRef)src width:(size_t)w height:(size_t)h {
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    CGContextRef ctx = CGBitmapContextCreate(NULL, w, h, 8, 0, cs,
-                                             kCGImageAlphaPremultipliedLast);
+    CGContextRef ctx = CGBitmapContextCreate(NULL, w, h, 8, 0, cs, kCGImageAlphaPremultipliedLast);
     CGColorSpaceRelease(cs);
     if (!ctx) return NULL;
     CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
@@ -95,7 +113,10 @@ static const CGFloat kDWMaxSide = 1024.0;
     CGImageRef full = image.CGImage;
     if (!full) return nil;
 
-    size_t W = CGImageGetWidth(full), H = CGImageGetHeight(full);
+    size_t W = CGImageGetWidth(full);
+    size_t H = CGImageGetHeight(full);
+    if (W == 0 || H == 0) return nil;
+
     CGFloat scale = MIN(1.0, kDWMaxSide / MAX((CGFloat)W, (CGFloat)H));
     size_t w = MAX((size_t)1, (size_t)(W * scale));
     size_t h = MAX((size_t)1, (size_t)(H * scale));
@@ -128,9 +149,9 @@ static const CGFloat kDWMaxSide = 1024.0;
 
 - (void)subjectMaskForImage:(UIImage *)image
                        data:(NSData *)data
-                 completion:(void (^)(UIImage *))completion {
-    NSURL *file = [[self cacheDirectory] URLByAppendingPathComponent:
-                   [[self keyForData:data] stringByAppendingString:@".png"]];
+                 completion:(void (^)(UIImage * _Nullable))completion {
+    NSURL *file = [[DWDepthEngine cacheDirectory] URLByAppendingPathComponent:
+                   [[DWDepthEngine keyForData:data] stringByAppendingString:@".png"]];
 
     UIImage *cached = [UIImage imageWithContentsOfFile:file.path];
     if (cached) {
