@@ -16,16 +16,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Fix libxml2.so.2 dependency
+      - name: Fix libtinfo dependency with patchelf
         run: |
-          # Tải gói libxml2 phiên bản cũ (có chứa libxml2.so.2)
-          wget https://launchpad.net/ubuntu/+archive/primary/+files/libxml2_2.12.7+dfsg+really2.9.14-0.4ubuntu0.4_amd64.deb
-          
-          # Cài đặt gói .deb vừa tải
-          sudo dpkg -i libxml2_2.12.7+dfsg+really2.9.14-0.4ubuntu0.4_amd64.deb
-          
-          # Dọn dẹp file cài đặt
-          rm -f libxml2_2.12.7+dfsg+really2.9.14-0.4ubuntu0.4_amd64.deb
+          sudo apt-get update
+          sudo apt-get install -y patchelf
+          # Tìm tất cả các tệp nhị phân trong toolchain và thay đổi thư viện liên kết
+          find "$THEOS/toolchain/linux/iphone/bin" -type f -executable -exec patchelf --replace-needed libtinfo.so.5 libtinfo.so.6 {} \;
   
       - name: Install system packages
         run: |
