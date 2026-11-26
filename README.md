@@ -88,3 +88,13 @@ Cài đặt → DepthWallpaper → Xem thử chiều sâu trên ảnh: chọn �
 - Ngưỡng saliency ở 30% giá trị đỉnh. Đo tỉ lệ mask ở 128x128.
 - Nếu saliency rỗng, dùng bounding box của vật nổi bật (VNGenerateObjectnessBasedSaliencyImageRequest).
 - Cache đổi sang v11, mask cũ bị bỏ qua.
+
+## Cập nhật v12
+- Fallback không còn là hình chữ nhật thuần: hộp vật nổi bật được giao với saliency ngưỡng 0.1 để viền bám theo vật thể. Nếu giao quá nhỏ thì dùng hộp.
+- Hạn chế đã biết trên iOS 16: Vision không tách được vật thể bất kỳ (chỉ có người). Chất lượng viền phụ thuộc ảnh.
+
+## Cập nhật v13: đường nạp model Core ML riêng
+- Không dùng model hay code của ExiWall. Tweak đọc model segmentation của bạn tại `/Library/Application Support/DepthWallpaper/DWSubject.mlmodelc`.
+- Model phải trả về ảnh (pixel buffer), trắng là chủ thể. Model dạng MLMultiArray (như DeepLabV3 chưa tách lớp) cần bước argmax riêng, chưa có trong bản này.
+- Nếu không có model, tweak dùng chuỗi Vision cũ.
+- Prefs bundle đã thêm DWModelSegmenter.m để tránh lỗi link.

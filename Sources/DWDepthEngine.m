@@ -2,10 +2,11 @@
 #import <Vision/Vision.h>
 #import <CommonCrypto/CommonDigest.h>
 #import <objc/message.h>
+#import "DWModelSegmenter.h"
 
 static const CGFloat kDWMaxSide = 1024.0;
 // Tăng số này mỗi khi đổi thuật toán mask, để bỏ cache mask cũ.
-static NSString *const kDWAlgoVersion = @"v11";
+static NSString *const kDWAlgoVersion = @"v13";
 static const double kDWMinCoverage = 0.005;
 
 @interface DWDepthEngine (Internal)
@@ -212,6 +213,13 @@ static const double kDWMinCoverage = 0.005;
         }
     }
     if (!maskSmall) {
+        // Model do người dùng cung cấp (nếu có)
+        maskSmall = [DWModelSegmenter maskForCGImage:small];
+        if (maskSmall && [self coverageOfCGImage:maskSmall] < kDWMinCoverage) {
+            CGImageRelease(maskSmall); maskSmall = NULL;
+        }
+    }
+    if (!maskSmall) {
         maskSmall = [self maskWithPersonSegmentation:small];
         if (maskSmall && [self coverageOfCGImage:maskSmall] < kDWMinCoverage) {
             CGImageRelease(maskSmall); maskSmall = NULL;
@@ -223,7 +231,30 @@ static const double kDWMinCoverage = 0.005;
             CGImageRelease(maskSmall); maskSmall = NULL;
         }
     }
-    if (!maskSmall) maskSmall = [self maskWithObjectness:small];
+    if (!maskSmall) {
+        // Hộp bao vật nổi bật, giao với saliency ngưỡng thấp để viền bám theo vật thể
+        CGImageRef box = [self maskWithObjectness:small];
+        CGImageRef sal = [self maskWithSaliency:small threshold:0.1];
+        if (box && sal) {
+            CIImage *cb = [CIImage imageWithCGImage:box];
+            CIImage *cs = [CIImage imageWithCGImage:sal];
+            CIFilter *mul = [CIFilter filterWithName:@"CIMultiplyCompositing"];
+            [mul setValue:cb forKey:kCIInputImageKey];
+            [mul setValue:cs forKey:kCIInputBackgroundImageKey];
+            CIImage *prod = mul.outputImage;
+            if (prod) {
+                CGImageRef pm = [[CIContext contextWithOptions:nil] createCGImage:prod fromRect:cb.extent];
+                if (pm && [self coverageOfCGImage:pm] >= kDWMinCoverage) {
+                    maskSmall = pm;
+                } else if (pm) {
+                    CGImageRelease(pm);
+                }
+            }
+        }
+        if (!maskSmall) maskSmall = box ? CGImageRetain(box) : NULL;
+        if (box) CGImageRelease(box);
+        if (sal) CGImageRelease(sal);
+    }
     CGImageRelease(small);
     if (!maskSmall) return nil;
 
