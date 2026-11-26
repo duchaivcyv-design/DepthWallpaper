@@ -1,7 +1,7 @@
 #import "DWModelSegmenter.h"
 #import "DWPrefs.h"
 #import <CoreML/CoreML.h>
-#import <CoreImage/CoreImage.h>
+#import <CoreGraphics/CoreGraphics.h>
 #import <CoreVideo/CoreVideo.h>
 #import <dlfcn.h>
 
@@ -50,13 +50,28 @@ static NSString *DWExistingRawModelPath(NSString **outCompiledDir) {
     return nil;
 }
 
-static CIContext *DWModelCIContext(void) {
-    static CIContext *ctx;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        ctx = [CIContext contextWithOptions:@{kCIContextUseSoftwareRenderer: @NO}];
-    });
-    return ctx;
+// Vẽ ảnh thẳng vào CVPixelBuffer 32BGRA bằng CoreGraphics (không dùng CIContext render API,
+// tránh phụ thuộc selector không có trên SDK 16.5). ScaleFill: phóng to vừa khung, cắt giữa.
+static BOOL DWDrawCGImageToPixelBuffer(CGImageRef src, CVPixelBufferRef pb, NSInteger size) {
+    if (!src || !pb) return NO;
+    CVPixelBufferLockBaseAddress(pb, 0);
+    void *base = CVPixelBufferGetBaseAddress(pb);
+    size_t bpr = CVPixelBufferGetBytesPerRow(pb);
+    CGColorSpaceRef rgb = CGColorSpaceCreateDeviceRGB();
+    CGContextRef ctx = CGBitmapContextCreate(base, size, size, 8, bpr, rgb,
+                                              kCGBitmapByteOrder32Little | kCGImageAlphaPremultipliedFirst);
+    CGColorSpaceRelease(rgb);
+    if (!ctx) { CVPixelBufferUnlockBaseAddress(pb, 0); return NO; }
+    CGFloat iw = (CGFloat)CGImageGetWidth(src);
+    CGFloat ih = (CGFloat)CGImageGetHeight(src);
+    CGFloat s = MAX((CGFloat)size / MAX(1.0, iw), (CGFloat)size / MAX(1.0, ih));
+    CGFloat dw = iw * s, dh = ih * s;
+    CGRect r = CGRectMake((size - dw) / 2.0, (size - dh) / 2.0, dw, dh);
+    CGContextClearRect(ctx, CGRectMake(0, 0, size, size));
+    CGContextDrawImage(ctx, r, src);
+    CGContextRelease(ctx);
+    CVPixelBufferUnlockBaseAddress(pb, 0);
+    return YES;
 }
 
 @implementation DWModelSegmenter
@@ -176,23 +191,21 @@ static CGImageRef DWMaskFromMultiArray(MLMultiArray *arr, NSInteger cls) {
     CVReturn cv = CVPixelBufferCreate(kCFAllocatorDefault, SZ, SZ, kCVPixelFormatType_32BGRA, NULL, &pb);
     if (cv != kCVReturnSuccess || !pb) { gLastStatus = @"không tạo được pixel buffer 320"; return NULL; }
     @autoreleasepool {
-        CIImage *ci = [CIImage imageWithCGImage:image];
-        CGFloat iw = (CGFloat)CGImageGetWidth(image);
-        CGFloat ih = (CGFloat)CGImageGetHeight(image);
-        // ScaleFill: phóng to vừa khung 320x320 rồi cắt giữa, giữ tỷ lệ chủ thể.
-        CGFloat s = MAX(SZ / MAX(1.0, iw), SZ / MAX(1.0, ih));
-        CGAffineTransform t = CGAffineTransformMakeTranslation((SZ - iw * s) / 2.0, (SZ - ih * s) / 2.0);
-        t = CGAffineTransformScale(t, s, s);
-        ci = [ci imageByApplyingTransform:t];
-        CGColorSpaceRef rgb = CGColorSpaceCreateDeviceRGB();
-        NSError *renderErr = nil;
-        [DWModelCIContext() render:ci toCVPixelBuffer:pb bounds:CGRectMake(0, 0, SZ, SZ)
-                        colorSpace:rgb error:&renderErr];
-        CGColorSpaceRelease(rgb);
+        if (!DWDrawCGImageToPixelBuffer(image, pb, SZ)) {
+            gLastStatus = @"vẽ ảnh vào pixel buffer 320 lỗi";
+            CVPixelBufferRelease(pb);
+            return NULL;
+        }
 
         MLFeatureValue *fv = [MLFeatureValue featureValueWithPixelBuffer:pb];
-        MLMutableDictionaryFeatureProvider *provider =
-            [[MLMutableDictionaryFeatureProvider alloc] initWithDictionary:@{ @"input.1": fv }];
+        NSError *provErr = nil;
+        MLDictionaryFeatureProvider *provider =
+            [[MLDictionaryFeatureProvider alloc] initWithDictionary:@{ @"input.1": fv } error:&provErr];
+        if (!provider) {
+            gLastStatus = [NSString stringWithFormat:@"provider lỗi: %@", DWShortText(provErr.description)];
+            CVPixelBufferRelease(pb);
+            return NULL;
+        }
         NSError *err = nil;
         id<MLFeatureProvider> out = [ml predictionFromFeatures:provider error:&err];
         if (!out) {
