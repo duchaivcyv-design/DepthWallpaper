@@ -5,7 +5,12 @@
 
 static const CGFloat kDWMaxSide = 1024.0;
 // Tăng số này mỗi khi đổi thuật toán mask, để bỏ cache mask cũ.
-static NSString *const kDWAlgoVersion = @"v8";
+static NSString *const kDWAlgoVersion = @"v11";
+static const double kDWMinCoverage = 0.005;
+
+@interface DWDepthEngine (Internal)
++ (double)coverageOfCGImage:(CGImageRef)m;
+@end
 
 @implementation DWDepthEngine
 
@@ -35,9 +40,33 @@ static NSString *const kDWAlgoVersion = @"v8";
     return s;
 }
 
+#pragma mark - Tiện ích CGImage
+
+// Tỉ lệ pixel sáng (>127) khi lấy mẫu 128x128
++ (double)coverageOfCGImage:(CGImageRef)m {
+    if (!m) return 0.0;
+    const size_t n = 128;
+    uint8_t *buf = calloc(n * n, 1);
+    CGColorSpaceRef gray = CGColorSpaceCreateDeviceGray();
+    CGContextRef ctx = CGBitmapContextCreate(buf, n, n, 8, n, gray, kCGImageAlphaNone);
+    CGColorSpaceRelease(gray);
+    if (!ctx) { free(buf); return 0.0; }
+    CGContextDrawImage(ctx, CGRectMake(0, 0, n, n), m);
+    CGContextRelease(ctx);
+    size_t on = 0;
+    for (size_t i = 0; i < n * n; i++) if (buf[i] > 127) on++;
+    free(buf);
+    return (double)on / (double)(n * n);
+}
+
+// Mask ảnh CIImage -> CGImage grayscale đúng kích thước
++ (CGImageRef)grayCGImageFromCIImage:(CIImage *)ci {
+    return [[CIContext contextWithOptions:nil] createCGImage:ci fromRect:ci.extent];
+}
+
 #pragma mark - Các bước tách mask (trả về CGImage grayscale, trắng = chủ thể; caller tự release)
 
-// iOS 17+: tách mọi vật thể nổi bật. Dùng runtime lookup vì SDK 16.5 chưa khai báo class này.
+// iOS 17+: tách mọi vật thể nổi bật. Runtime lookup vì SDK 16.5 chưa khai báo class này.
 + (CGImageRef)maskWithInstanceMask:(CGImageRef)cg {
     Class reqCls = NSClassFromString(@"VNGenerateForegroundInstanceMaskRequest");
     if (!reqCls) return NULL;
@@ -61,7 +90,7 @@ static NSString *const kDWAlgoVersion = @"v8";
     if (!pb) return NULL;
 
     CIImage *ci = [CIImage imageWithCVPixelBuffer:pb];
-    CGImageRef out = [[CIContext contextWithOptions:nil] createCGImage:ci fromRect:ci.extent];
+    CGImageRef out = [self grayCGImageFromCIImage:ci];
     CVPixelBufferRelease(pb);
     return out;
 }
@@ -76,13 +105,14 @@ static NSString *const kDWAlgoVersion = @"v8";
         CVPixelBufferRef pb = req.results.firstObject.pixelBuffer;
         if (!pb) return NULL;
         CIImage *ci = [CIImage imageWithCVPixelBuffer:pb];
-        return [[CIContext contextWithOptions:nil] createCGImage:ci fromRect:ci.extent];
+        return [self grayCGImageFromCIImage:ci];
     }
     return NULL;
 }
 
-// iOS 13+: vùng nổi bật theo saliency, dùng cho ảnh không có người
-+ (CGImageRef)maskWithSaliency:(CGImageRef)cg {
+// iOS 13+: heatmap saliency. Ngưỡng ở `t` nhân với giá trị đỉnh.
+// Quan trọng: ghi cùng một giá trị vào R, G, B để mask là ảnh xám thật (không bị đỏ).
++ (CGImageRef)maskWithSaliency:(CGImageRef)cg threshold:(double)t {
     VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
     VNGenerateAttentionBasedSaliencyImageRequest *req = [VNGenerateAttentionBasedSaliencyImageRequest new];
     if (![handler performRequests:@[req] error:nil]) return NULL;
@@ -92,7 +122,7 @@ static NSString *const kDWAlgoVersion = @"v8";
     CIImage *ci = [CIImage imageWithCVPixelBuffer:pb];
     CIContext *ctx = [CIContext contextWithOptions:nil];
 
-    // Lấy giá trị lớn nhất của heatmap
+    // Đỉnh heatmap (đọc 1 pixel, kết quả 0..255)
     CIFilter *maxF = [CIFilter filterWithName:@"CIAreaMaximum"];
     [maxF setValue:ci forKey:kCIInputImageKey];
     [maxF setValue:[CIVector vectorWithCGRect:ci.extent] forKey:kCIInputExtentKey];
@@ -101,24 +131,48 @@ static NSString *const kDWAlgoVersion = @"v8";
     uint8_t px[4] = {0, 0, 0, 0};
     [ctx render:maxImg toBitmap:px rowBytes:4 bounds:CGRectMake(0, 0, 1, 1)
          format:kCIFormatRGBA8 colorSpace:nil];
-    double peak = MAX(1.0, (double)MAX(px[0], MAX(px[1], px[2])));
+    double peakByte = MAX(1.0, (double)MAX(px[0], MAX(px[1], px[2])));
 
-    // Chuẩn hoá về [0,1] theo peak, rồi ngưỡng 50% (contrast mạnh quanh 0.5)
-    CGFloat k = (CGFloat)(255.0 / peak);
-    CIFilter *norm = [CIFilter filterWithName:@"CIColorMatrix"];
-    [norm setValue:ci forKey:kCIInputImageKey];
-    [norm setValue:[CIVector vectorWithX:k Y:0 Z:0 W:0] forKey:@"inputRVector"];
-    [norm setValue:[CIVector vectorWithX:0 Y:0 Z:0 W:0] forKey:@"inputGVector"];
-    [norm setValue:[CIVector vectorWithX:0 Y:0 Z:0 W:0] forKey:@"inputBVector"];
-    [norm setValue:[CIVector vectorWithX:0 Y:0 Z:0 W:1] forKey:@"inputAVector"];
-    [norm setValue:[CIVector vectorWithX:0 Y:0 Z:0 W:0] forKey:@"inputBiasVector"];
-    CIImage *scaled = norm.outputImage ?: ci;
+    // out = clamp((v / peak - t) * 20 + 0.5), với v lấy từ kênh R (0..1)
+    double s = 20.0 * 255.0 / peakByte;
+    double b = 0.5 - 20.0 * t;
+    CIFilter *f = [CIFilter filterWithName:@"CIColorMatrix"];
+    [f setValue:ci forKey:kCIInputImageKey];
+    [f setValue:[CIVector vectorWithX:s Y:0 Z:0 W:0] forKey:@"inputRVector"];
+    [f setValue:[CIVector vectorWithX:s Y:0 Z:0 W:0] forKey:@"inputGVector"];
+    [f setValue:[CIVector vectorWithX:s Y:0 Z:0 W:0] forKey:@"inputBVector"];
+    [f setValue:[CIVector vectorWithX:0 Y:0 Z:0 W:0] forKey:@"inputAVector"];
+    [f setValue:[CIVector vectorWithX:b Y:b Z:b W:1] forKey:@"inputBiasVector"];
+    CIImage *out = f.outputImage;
+    if (!out) return NULL;
+    return [ctx createCGImage:out fromRect:ci.extent];
+}
 
-    CIFilter *thr = [CIFilter filterWithName:@"CIColorControls"];
-    [thr setValue:scaled forKey:kCIInputImageKey];
-    [thr setValue:@(6.0) forKey:kCIInputContrastKey];
-    CIImage *boosted = thr.outputImage ?: scaled;
-    return [ctx createCGImage:boosted fromRect:boosted.extent];
+// iOS 13+: hình chữ nhật bao quanh vật nổi bật. Dùng khi heatmap không ra gì.
++ (CGImageRef)maskWithObjectness:(CGImageRef)cg {
+    VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:cg options:@{}];
+    VNGenerateObjectnessBasedSaliencyImageRequest *req = [VNGenerateObjectnessBasedSaliencyImageRequest new];
+    if (![handler performRequests:@[req] error:nil]) return NULL;
+    VNSaliencyImageObservation *obs = req.results.firstObject;
+    NSArray<VNRectangleObservation *> *objs = obs.salientObjects;
+    if (objs.count == 0) return NULL;
+
+    size_t w = CGImageGetWidth(cg), h = CGImageGetHeight(cg);
+    CGColorSpaceRef gray = CGColorSpaceCreateDeviceGray();
+    CGContextRef ctx = CGBitmapContextCreate(NULL, w, h, 8, 0, gray, kCGImageAlphaNone);
+    CGColorSpaceRelease(gray);
+    if (!ctx) return NULL;
+    CGContextSetGrayFillColor(ctx, 0.0, 1.0);
+    CGContextFillRect(ctx, CGRectMake(0, 0, w, h));
+    CGContextSetGrayFillColor(ctx, 1.0, 1.0);
+    for (VNRectangleObservation *o in objs) {
+        CGRect r = o.boundingBox; // chuẩn hoá, gốc dưới-trái
+        CGContextFillRect(ctx, CGRectMake(r.origin.x * w, r.origin.y * h,
+                                          r.size.width * w, r.size.height * h));
+    }
+    CGImageRef out = CGBitmapContextCreateImage(ctx);
+    CGContextRelease(ctx);
+    return out;
 }
 
 // Thu nhỏ ảnh để tách nhanh
@@ -134,7 +188,7 @@ static NSString *const kDWAlgoVersion = @"v8";
     return out;
 }
 
-// Tính mask đầy đủ kích thước ảnh gốc
+// Tính mask đầy đủ kích thước ảnh gốc, có chuỗi fallback
 + (UIImage *)computeMaskForImage:(UIImage *)image {
     CGImageRef full = image.CGImage;
     if (!full) return nil;
@@ -153,9 +207,23 @@ static NSString *const kDWAlgoVersion = @"v8";
     CGImageRef maskSmall = NULL;
     if (@available(iOS 17.0, *)) {
         maskSmall = [self maskWithInstanceMask:small];
+        if (maskSmall && [self coverageOfCGImage:maskSmall] < kDWMinCoverage) {
+            CGImageRelease(maskSmall); maskSmall = NULL;
+        }
     }
-    if (!maskSmall) maskSmall = [self maskWithPersonSegmentation:small];
-    if (!maskSmall) maskSmall = [self maskWithSaliency:small];
+    if (!maskSmall) {
+        maskSmall = [self maskWithPersonSegmentation:small];
+        if (maskSmall && [self coverageOfCGImage:maskSmall] < kDWMinCoverage) {
+            CGImageRelease(maskSmall); maskSmall = NULL;
+        }
+    }
+    if (!maskSmall) {
+        maskSmall = [self maskWithSaliency:small threshold:0.3];
+        if (maskSmall && [self coverageOfCGImage:maskSmall] < kDWMinCoverage) {
+            CGImageRelease(maskSmall); maskSmall = NULL;
+        }
+    }
+    if (!maskSmall) maskSmall = [self maskWithObjectness:small];
     CGImageRelease(small);
     if (!maskSmall) return nil;
 
@@ -171,6 +239,10 @@ static NSString *const kDWAlgoVersion = @"v8";
     UIImage *img = [UIImage imageWithCGImage:out];
     CGImageRelease(out);
     return img;
+}
+
++ (double)coverageOfMask:(UIImage *)mask {
+    return mask.CGImage ? [self coverageOfCGImage:mask.CGImage] : 0.0;
 }
 
 - (void)subjectMaskForImage:(UIImage *)image
@@ -198,22 +270,6 @@ static NSString *const kDWAlgoVersion = @"v8";
 
 + (UIImage *)cutoutFromImage:(UIImage *)image mask:(UIImage *)mask {
     return [self cutoutFromImage:image mask:mask thickness:0.0];
-}
-
-+ (double)coverageOfMask:(UIImage *)mask {
-    if (!mask.CGImage) return 0.0;
-    const size_t n = 64;
-    uint8_t *buf = calloc(n * n, 1);
-    CGColorSpaceRef gray = CGColorSpaceCreateDeviceGray();
-    CGContextRef ctx = CGBitmapContextCreate(buf, n, n, 8, n, gray, kCGImageAlphaNone);
-    CGColorSpaceRelease(gray);
-    if (!ctx) { free(buf); return 0.0; }
-    CGContextDrawImage(ctx, CGRectMake(0, 0, n, n), mask.CGImage);
-    CGContextRelease(ctx);
-    size_t on = 0;
-    for (size_t i = 0; i < n * n; i++) if (buf[i] > 127) on++;
-    free(buf);
-    return (double)on / (double)(n * n);
 }
 
 + (UIImage *)cutoutFromImage:(UIImage *)image mask:(UIImage *)mask thickness:(double)thickness {

@@ -82,3 +82,9 @@ Cài đặt → DepthWallpaper → Xem thử chiều sâu trên ảnh: chọn �
 - Tweak tìm wallpaper ở mọi cửa sổ, chụp và tách chủ thể.
 - Chủ thể được đặt trong một UIWindow riêng có windowLevel = cửa sổ cover sheet + 0.5, nên nằm trên đồng hồ và thông báo, còn wallpaper và đồng hồ không bị đụng tới.
 - Đồng hồ không còn bị di chuyển. Mục "đẩy đồng hồ xuống" trên màn khóa tạm không hoạt động.
+
+## Cập nhật v11: sửa mask trống (0%)
+- Lỗi chính: mask saliency chỉ ghi kênh đỏ nên độ sáng thực chỉ còn ~30% và bị ngưỡng thành đen. Nay ghi đủ R, G, B.
+- Ngưỡng saliency ở 30% giá trị đỉnh. Đo tỉ lệ mask ở 128x128.
+- Nếu saliency rỗng, dùng bounding box của vật nổi bật (VNGenerateObjectnessBasedSaliencyImageRequest).
+- Cache đổi sang v11, mask cũ bị bỏ qua.
