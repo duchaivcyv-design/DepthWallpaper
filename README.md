@@ -76,3 +76,9 @@ Cài đặt → DepthWallpaper → Xem thử chiều sâu trên ảnh: chọn �
 - Mọi bước ghi vào /var/mobile/Library/Logs/DepthWallpaper/lock.txt để biết nơi lỗi.
 - Hiệu ứng trên trang trình chỉnh sửa (Xem thử) vẫn có.
 - Chưa hoạt động nếu wallpaper được vẽ ở process khác (PosterBoard). Khi đó lock.txt sẽ ghi "Chụp wallpaper thất bại".
+
+## Cập nhật v10: lớp chủ thể trên cover sheet
+- Log lock.txt cho thấy wallpaper KHÔNG nằm trong cây view của cover sheet. Wallpaper nằm ở cửa sổ riêng (PRPosterWindow/PBUI).
+- Tweak tìm wallpaper ở mọi cửa sổ, chụp và tách chủ thể.
+- Chủ thể được đặt trong một UIWindow riêng có windowLevel = cửa sổ cover sheet + 0.5, nên nằm trên đồng hồ và thông báo, còn wallpaper và đồng hồ không bị đụng tới.
+- Đồng hồ không còn bị di chuyển. Mục "đẩy đồng hồ xuống" trên màn khóa tạm không hoạt động.

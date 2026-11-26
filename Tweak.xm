@@ -16,10 +16,6 @@ static Class gDateCls;
 static Class gCoverCls;
 
 // Trạng thái màn khóa
-static DWRenderer *gLockRenderer;
-static UIView *gLockWall;
-static UIView *gLockDate;
-static UIView *gLockDateOrigSuper;
 static BOOL gDepthOn = YES;
 static BOOL gJitterDisabledByUs = NO;
 
@@ -92,31 +88,57 @@ static UIImage *DWSnapshotView(UIView *v) {
     return img;
 }
 
-#pragma mark - Màn khóa: chiều sâu thật
+#pragma mark - Màn khóa: chiều sâu thật (cửa sổ chủ thể nằm trên cover sheet)
+
+// Cửa sổ chứa chủ thể: đặt trên cửa sổ cover sheet, nên chủ thể nằm trên đồng hồ và thông báo.
+static UIWindow *gSubjectWindow;
 
 static void DWTearDownLock(void) {
-    if (gLockDate && gLockDateOrigSuper) {
-        CGRect f = [gLockDate convertRect:gLockDate.bounds toView:gLockDateOrigSuper];
-        [gLockDateOrigSuper addSubview:gLockDate];
-        gLockDate.frame = f;
+    gSubjectWindow.hidden = YES;
+    gSubjectWindow = nil;
+}
+
+// Tìm wallpaper ở mọi cửa sổ (wallpaper nằm ở cửa sổ riêng, không nằm trong cover sheet)
+static UIView *DWFindWallpaperAnyWindow(void) {
+    NSMutableArray<Class> *classes = [NSMutableArray array];
+    if (gWallpaperCls) [classes addObject:gWallpaperCls];
+    for (NSString *n in @[@"PBUIStaticWallpaperView", @"PBUIWallpaperView",
+                          @"PBUIScrollableStaticWallpaperView"]) {
+        Class c = NSClassFromString(n);
+        if (c) [classes addObject:c];
     }
-    if (gLockWall) gLockWall.hidden = NO;
-    [gLockRenderer removeFromSuperview];
-    gLockRenderer = nil;
-    gLockWall = nil;
-    gLockDate = nil;
-    gLockDateOrigSuper = nil;
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        for (Class c in classes) {
+            UIView *v = DWFindSubview(w, c);
+            if (v) return v;
+        }
+    }
+    return nil;
+}
+
+// Cửa sổ cover sheet: cửa sổ chứa đồng hồ, hoặc cửa sổ của cover sheet view controller
+static UIWindow *DWCoverWindow(UIViewController *vc) {
+    if (vc.view.window) return vc.view.window;
+    for (UIWindow *w in [UIApplication sharedApplication].windows) {
+        if (DWFindSubview(w, gDateCls)) return w;
+    }
+    return nil;
 }
 
 static void DWAttachLockDepth(UIViewController *vc) {
     if (!DWPrefBool(@"enabled", YES) || !DWPrefBool(@"depthWallpaper", YES)) return;
-    if (gLockRenderer) return;
+    if (gSubjectWindow) return;
 
-    UIView *root = vc.view;
-    UIView *wall = DWFindSubview(root, gWallpaperCls);
-    UIView *date = DWFindSubview(root, gDateCls);
-    if (!wall) { DWLockLog(@"KHÔNG tìm thấy wallpaper view trong cover sheet"); return; }
-    if (!date) { DWLockLog(@"KHÔNG tìm thấy date view (đồng hồ)"); }
+    NSArray<UIWindow *> *all = [UIApplication sharedApplication].windows;
+    DWLockLog([NSString stringWithFormat:@"Số cửa sổ hiện tại: %lu", (unsigned long)all.count]);
+
+    UIView *wall = DWFindWallpaperAnyWindow();
+    if (!wall) { DWLockLog(@"KHÔNG tìm thấy wallpaper ở bất kỳ cửa sổ nào"); return; }
+    DWLockLog([NSString stringWithFormat:@"Tìm thấy wallpaper: %@ bounds=%@",
+               NSStringFromClass([wall class]), NSStringFromCGRect(wall.bounds)]);
+
+    UIWindow *coverWin = DWCoverWindow(vc);
+    if (!coverWin) { DWLockLog(@"KHÔNG tìm thấy cửa sổ cover sheet"); return; }
 
     UIImage *snap = DWSnapshotView(wall);
     if (!snap) { DWLockLog(@"Chụp wallpaper thất bại (ảnh đen hoặc nội dung nằm ở process khác)"); return; }
@@ -134,29 +156,25 @@ static void DWAttachLockDepth(UIViewController *vc) {
         UIImage *cut = [DWDepthEngine cutoutFromImage:snap mask:mask
                                             thickness:DWPrefDouble(@"subjectThickness", 0.0)];
         if (!cut) { DWLockLog(@"Cắt chủ thể thất bại"); return; }
+        if (gSubjectWindow) return;
 
-        // Vẫn còn đúng cover sheet này và chưa gắn lớp nào
-        if (gLockRenderer || !wall.superview) return;
+        UIWindowScene *scene = coverWin.windowScene;
+        UIWindow *w = scene ? [[UIWindow alloc] initWithWindowScene:scene]
+                            : [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+        w.frame = coverWin.bounds;
+        w.windowLevel = coverWin.windowLevel + 0.5; // trên đồng hồ, dưới các cửa sổ hệ thống cao hơn
+        w.backgroundColor = [UIColor clearColor];
+        w.userInteractionEnabled = NO;
 
-        DWRenderer *r = [[DWRenderer alloc] initWithFrame:wall.frame];
-        r.autoresizingMask = wall.autoresizingMask;
-        [wall.superview insertSubview:r aboveSubview:wall];
-        wall.hidden = YES;
+        UIImageView *iv = [[UIImageView alloc] initWithFrame:w.bounds];
+        iv.image = cut;
+        iv.contentMode = UIViewContentModeScaleAspectFill;
+        iv.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+        [w addSubview:iv];
+        w.hidden = NO;
 
-        [r setBackground:snap subject:cut];
-
-        if (date) {
-            gLockDateOrigSuper = date.superview;
-            CGRect f = [date convertRect:date.bounds toView:r.clockSlot];
-            [r.clockSlot addSubview:date];
-            date.frame = f;
-            gLockDate = date;
-        }
-
-        gLockRenderer = r;
-        gLockWall = wall;
-        [r setClockPushedDown:gDepthOn];
-        DWLockLog(@"Đã gắn lớp chiều sâu lên màn khóa");
+        gSubjectWindow = w;
+        DWLockLog(@"Đã đặt chủ thể lên trên đồng hồ (cửa sổ chiều sâu)");
     }];
 }
 
@@ -197,7 +215,7 @@ static void DWAttachLockDepth(UIViewController *vc) {
     if (g.state != UIGestureRecognizerStateBegan) return;
     if (!DWPrefBool(@"enabled", YES) || !DWPrefBool(@"depthToggle", YES)) return;
     gDepthOn = !gDepthOn;
-    if (gLockRenderer) [gLockRenderer setClockPushedDown:gDepthOn];
+    (void)gDepthOn;
 }
 
 %end
@@ -233,7 +251,7 @@ static void DWReloadFromPrefs(CFNotificationCenterRef center, void *observer,
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!DWPrefBool(@"enabled", YES) || !DWPrefBool(@"depthWallpaper", YES)) {
             DWTearDownLock();
-        } else if (gCoverCls && !gLockRenderer) {
+        } else if (gCoverCls && !gSubjectWindow) {
             // Áp dụng ngay nếu màn khóa đang hiện: không cần khóa lại máy
             DWLockLog(@"Nhận lệnh bật lại từ Cài đặt");
         }
