@@ -1,7 +1,7 @@
 include $(THEOS)/makefiles/common.mk
 
 BUNDLE_NAME = DepthWallpaperPrefs
-DepthWallpaperPrefs_FILES = DWRootListController.m DWDepthPreviewController.m ../Sources/DWDepthEngine.m ../Sources/DWRenderer.m
+DepthWallpaperPrefs_FILES = DWRootListController.m DWDepthPreviewController.m ../Sources/DWDepthEngine.m ../Sources/DWRenderer.m ../Sources/DWPrefs.m
 DepthWallpaperPrefs_RESOURCE_DIRS = Resources
 DepthWallpaperPrefs_INSTALL_PATH = /Library/PreferenceBundles
 DepthWallpaperPrefs_FRAMEWORKS = UIKit Vision CoreImage QuartzCore
