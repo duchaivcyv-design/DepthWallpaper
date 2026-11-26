@@ -19,6 +19,11 @@ static Class gCoverCls;
 // Trạng thái màn khóa
 static BOOL gDepthOn = YES;
 static BOOL gJitterDisabledByUs = NO;
+// CHỈ hỗ trợ iOS 16.0 - 18.0; ngoài khoảng này không gắn hook, không làm gì.
+static BOOL DWSystemSupported(void) {
+    NSOperatingSystemVersion v = [[NSProcessInfo processInfo] operatingSystemVersion];
+    return (v.majorVersion >= 16 && v.majorVersion <= 18);
+}
 
 #pragma mark - Log (để đọc lỗi trên máy)
 
@@ -95,7 +100,8 @@ static UIImage *DWSnapshotView(UIView *v) {
     CGContextRelease(ctx);
     long sum = 0;
     for (int i = 0; i < 16 * 16 * 4; i += 4) sum += px[i] + px[i + 1] + px[i + 2];
-    if (sum < 1000) return nil;
+    // Ngưỡng cũ 1000 quá thấp: ảnh gần đen vẫn qua, khiến saliency ra mask nhiễu 5%.
+    if (sum < 20000) return nil;
     return img;
 }
 
@@ -137,6 +143,7 @@ static UIWindow *DWCoverWindow(UIViewController *vc) {
 }
 
 static void DWAttachLockDepth(UIViewController *vc) {
+    if (!DWSystemSupported()) return;
     if (!DWPrefBool(@"enabled", YES) || !DWPrefBool(@"depthWallpaper", YES)) return;
     if (gSubjectWindow) return;
 
@@ -150,6 +157,9 @@ static void DWAttachLockDepth(UIViewController *vc) {
 
     UIWindow *coverWin = DWCoverWindow(vc);
     if (!coverWin) { DWLockLog(@"KHÔNG tìm thấy cửa sổ cover sheet"); return; }
+    DWLockLog([NSString stringWithFormat:@"Cover window: %@ level=%.2f frame=%@",
+               NSStringFromClass([coverWin class]), coverWin.windowLevel,
+               NSStringFromCGRect(coverWin.frame)]);
 
     UIImage *snap = DWSnapshotView(wall);
     if (!snap) { DWLockLog(@"Chụp wallpaper thất bại (ảnh đen hoặc nội dung nằm ở process khác)"); return; }
@@ -268,6 +278,7 @@ static void DWReloadFromPrefs(CFNotificationCenterRef center, void *observer,
 }
 
 %ctor {
+    if (!DWSystemSupported()) return;
     DWDumpRelevantClassesOnce();
 
     CFNotificationCenterAddObserver(CFNotificationCenterGetDarwinNotifyCenter(), NULL,

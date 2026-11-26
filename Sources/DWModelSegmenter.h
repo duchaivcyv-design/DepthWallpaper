@@ -3,9 +3,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// Chạy model Core ML segmentation do người dùng cung cấp tại
-/// /Library/Application Support/DepthWallpaper/DWSubject.mlmodelc
-/// Model phải có đầu ra là ảnh (pixel buffer), trắng = chủ thể.
+/// Chạy model Core ML segmentation DWSubject.mlmodel. Đường dẫn được dò động:
+/// cùng cây với dylib (<root>/Library/Application Support/DepthWallpaper),
+/// /var/jb/Library/Application Support/DepthWallpaper, hoặc /Library/... (rootful).
+/// Model phải trả về ảnh (pixel buffer) hoặc MLMultiArray xác suất [1,H,W], trắng = chủ thể.
 @interface DWModelSegmenter : NSObject
 
 /// Trả về CGImage grayscale cùng kích thước ảnh đầu vào, hoặc NULL nếu không có model / lỗi.

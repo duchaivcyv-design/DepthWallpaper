@@ -6,7 +6,7 @@
 
 static const CGFloat kDWMaxSide = 1024.0;
 // Tăng số này mỗi khi đổi thuật toán mask, để bỏ cache mask cũ.
-static NSString *const kDWAlgoVersion = @"v17";
+static NSString *const kDWAlgoVersion = @"v18";
 static NSString *gMaskSource = @"chưa có";
 static const double kDWMinCoverage = 0.005;
 

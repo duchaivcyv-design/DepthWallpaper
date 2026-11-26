@@ -2,34 +2,66 @@
 #import "DWPrefs.h"
 #import <Vision/Vision.h>
 #import <CoreML/CoreML.h>
-
+#import <dlfcn.h>
 // Model U²-Net (Apache-2.0) đã chuyển sang Core ML bằng tools/convert_u2net.py.
 // Đầu ra: MLMultiArray [1,1,320,320] là xác suất chủ thể.
+// FIX: không hard-code đường rootful /Library. Build rootless cài vào /var/jb,
+// roothide dùng jbroot ngẫu nhiên -> dò theo thư mục chứa dylib + đường phổ biến.
 static NSString *gLastStatus = @"chưa thử";
 
-static NSString *const kDWModelPath = @"/Library/Application Support/DepthWallpaper/DWSubject.mlmodel";
+// <root>/Library/MobileSubstrate/DynamicLibraries/<tweak>.dylib -> <root>/Library/Application Support/DepthWallpaper
+static NSArray<NSString *> *DWModelDirectories(void) {
+    NSMutableArray<NSString *> *dirs = [NSMutableArray array];
+    Dl_info info = {0};
+    if (dladdr((const void *)&DWModelDirectories, &info) && info.dli_fname) {
+        NSString *p = [NSString stringWithUTF8String:info.dli_fname].stringByDeletingLastPathComponent; // DynamicLibraries
+        p = p.stringByDeletingLastPathComponent; // MobileSubstrate
+        p = p.stringByDeletingLastPathComponent; // Library
+        NSString *root = p.stringByDeletingLastPathComponent;
+        if (root.length) {
+            [dirs addObject:[root stringByAppendingPathComponent:@"/Library/Application Support/DepthWallpaper"]];
+        }
+    }
+    [dirs addObject:@"/var/jb/Library/Application Support/DepthWallpaper"]; // rootless Dopamine
+    [dirs addObject:@"/Library/Application Support/DepthWallpaper"];       // rootful (dự phòng)
+    return dirs;
+}
+
+// Trả về đường dẫn .mlmodel thô; nếu thấy sẵn .mlmodelc thì ghi ra *outCompiledDir và trả nil.
+static NSString *DWExistingRawModelPath(NSString **outCompiledDir) {
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *dir in DWModelDirectories()) {
+        NSString *compiled = [dir stringByAppendingPathComponent:@"DWSubject.mlmodelc"];
+        if ([fm fileExistsAtPath:compiled]) {
+            if (outCompiledDir) *outCompiledDir = compiled;
+            return nil;
+        }
+        NSString *raw = [dir stringByAppendingPathComponent:@"DWSubject.mlmodel"];
+        if ([fm fileExistsAtPath:raw]) return raw;
+    }
+    return nil;
+}
 
 @implementation DWModelSegmenter
-
 // Biên dịch .mlmodel trên máy (lần đầu) rồi giữ bản .mlmodelc trong Caches
 + (nullable NSURL *)compiledModelURL {
     NSFileManager *fm = [NSFileManager defaultManager];
-    if (![fm fileExistsAtPath:kDWModelPath]) { gLastStatus = @"không có file model"; return nil; }
-
+    NSString *compiledDir = nil;
+    NSString *rawPath = DWExistingRawModelPath(&compiledDir);
+    if (compiledDir) { gLastStatus = @"dùng model .mlmodelc có sẵn"; return [NSURL fileURLWithPath:compiledDir]; }
+    if (!rawPath) { gLastStatus = @"không có file model"; return nil; }
     NSURL *caches = [[fm URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask] firstObject];
     NSURL *dir = [caches URLByAppendingPathComponent:@"DepthWallpaper" isDirectory:YES];
     [fm createDirectoryAtURL:dir withIntermediateDirectories:YES attributes:nil error:nil];
     NSURL *dest = [dir URLByAppendingPathComponent:@"DWSubject.mlmodelc" isDirectory:YES];
     if ([fm fileExistsAtPath:dest.path]) return dest;
-
     NSError *err = nil;
-    NSURL *tmp = [MLModel compileModelAtURL:[NSURL fileURLWithPath:kDWModelPath] error:&err];
+    NSURL *tmp = [MLModel compileModelAtURL:[NSURL fileURLWithPath:rawPath] error:&err];
     if (!tmp) { gLastStatus = [NSString stringWithFormat:@"biên dịch lỗi: %@", err]; return nil; }
     [fm removeItemAtURL:dest error:nil];
     if (![fm moveItemAtURL:tmp toURL:dest error:&err]) { gLastStatus = [NSString stringWithFormat:@"move lỗi: %@", err]; return nil; }
     return dest;
 }
-
 + (nullable VNCoreMLModel *)loadedModel {
     static VNCoreMLModel *model;
     static dispatch_once_t once;
@@ -44,15 +76,12 @@ static NSString *const kDWModelPath = @"/Library/Application Support/DepthWallpa
     });
     return model;
 }
-
 + (NSString *)lastStatus {
     return gLastStatus;
 }
-
 + (BOOL)isModelAvailable {
     return [self loadedModel] != nil;
 }
-
 static double DWValueAt(MLMultiArray *arr, NSInteger linear) {
     if (arr.dataType == MLMultiArrayDataTypeFloat32) {
         return ((const float *)arr.dataPointer)[linear];
@@ -65,7 +94,6 @@ static double DWValueAt(MLMultiArray *arr, NSInteger linear) {
     }
     return 0.0;
 }
-
 // Chuyển MLMultiArray đầu ra thành mask gray (255 = chủ thể).
 // - Xác suất 1 kênh (U²-Net): pixel = 255 nếu xác suất >= 0.5.
 // - Nhãn lớp [H,W]: pixel = 255 nếu nhãn == cls.
@@ -86,7 +114,6 @@ static CGImageRef DWMaskFromMultiArray(MLMultiArray *arr, NSInteger cls) {
         return NULL;
     }
     if (H <= 0 || W <= 0) return NULL;
-
     uint8_t *buf = calloc((size_t)(H * W), 1);
     for (NSInteger y = 0; y < H; y++) {
         for (NSInteger x = 0; x < W; x++) {
@@ -107,7 +134,6 @@ static CGImageRef DWMaskFromMultiArray(MLMultiArray *arr, NSInteger cls) {
             buf[idx] = on ? 255 : 0;
         }
     }
-
     CGColorSpaceRef gray = CGColorSpaceCreateDeviceGray();
     CGContextRef ctx = CGBitmapContextCreate(buf, (size_t)W, (size_t)H, 8, (size_t)W, gray,
                                              kCGImageAlphaNone);
@@ -117,19 +143,15 @@ static CGImageRef DWMaskFromMultiArray(MLMultiArray *arr, NSInteger cls) {
     free(buf);
     return out;
 }
-
 + (nullable CGImageRef)maskForCGImage:(CGImageRef)image {
     VNCoreMLModel *model = [self loadedModel];
     if (!model || !image) return NULL;
-
     VNCoreMLRequest *req = [[VNCoreMLRequest alloc] initWithModel:model];
     req.imageCropAndScaleOption = VNImageCropAndScaleOptionScaleFill;
     VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:image options:@{}];
     NSError *perr = nil;
     if (![handler performRequests:@[req] error:&perr]) { gLastStatus = [NSString stringWithFormat:@"suy luận lỗi: %@", perr]; return NULL; }
-
     size_t W = CGImageGetWidth(image), H = CGImageGetHeight(image);
-
     for (id r in req.results) {
         if ([r isKindOfClass:[VNPixelBufferObservation class]]) {
             CIImage *ci = [CIImage imageWithCVPixelBuffer:((VNPixelBufferObservation *)r).pixelBuffer];
@@ -139,7 +161,6 @@ static CGImageRef DWMaskFromMultiArray(MLMultiArray *arr, NSInteger cls) {
             return [[CIContext contextWithOptions:nil] createCGImage:ci fromRect:CGRectMake(0, 0, W, H)];
         }
     }
-
     NSInteger cls = (NSInteger)DWPrefDouble(@"segClass", 15);
     for (id r in req.results) {
         if ([r isKindOfClass:[VNCoreMLFeatureValueObservation class]]) {
@@ -157,5 +178,4 @@ static CGImageRef DWMaskFromMultiArray(MLMultiArray *arr, NSInteger cls) {
     }
     return NULL;
 }
-
 @end
