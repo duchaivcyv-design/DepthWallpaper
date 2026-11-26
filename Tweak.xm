@@ -4,6 +4,7 @@
 #import "Sources/DWDepthEngine.h"
 #import "Sources/DWRenderer.h"
 #import "Sources/DWClassResolver.h"
+#import "Sources/DWModelSegmenter.h"
 
 // Placeholder để Logos biên dịch. Class thật được gắn lúc chạy qua %init(..., Name = cls).
 // Các class này đã xác nhận có trên iOS 16.7.16 (log classes-SpringBoard-16.7.16.txt).
@@ -160,7 +161,8 @@ static void DWAttachLockDepth(UIViewController *vc) {
         if (!mask) { DWLockLog(@"Không tách được chủ thể từ wallpaper"); return; }
 
         double cov = [DWDepthEngine coverageOfMask:mask];
-        DWLockLog([NSString stringWithFormat:@"Mask chủ thể chiếm %.1f%%", cov * 100]);
+        DWLockLog([NSString stringWithFormat:@"Nguồn mask: %@ | model: %@ | Mask chủ thể chiếm %.1f%%",
+                   [DWDepthEngine lastMaskSource], [DWModelSegmenter lastStatus], cov * 100]);
         if (cov < 0.01 || cov > 0.95) { DWLockLog(@"Mask không dùng được, bỏ qua"); return; }
 
         UIImage *cut = [DWDepthEngine cutoutFromImage:snap mask:mask

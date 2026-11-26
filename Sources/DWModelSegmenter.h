@@ -15,6 +15,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// YES nếu file model tồn tại và nạp được.
 + (BOOL)isModelAvailable;
 
+/// Trạng thái nạp model gần nhất, dùng để ghi log.
++ (NSString *)lastStatus;
+
 @end
 
 NS_ASSUME_NONNULL_END

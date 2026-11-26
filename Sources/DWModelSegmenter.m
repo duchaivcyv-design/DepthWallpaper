@@ -5,6 +5,8 @@
 
 // Model U²-Net (Apache-2.0) đã chuyển sang Core ML bằng tools/convert_u2net.py.
 // Đầu ra: MLMultiArray [1,1,320,320] là xác suất chủ thể.
+static NSString *gLastStatus = @"chưa thử";
+
 static NSString *const kDWModelPath = @"/Library/Application Support/DepthWallpaper/DWSubject.mlmodel";
 
 @implementation DWModelSegmenter
@@ -12,7 +14,7 @@ static NSString *const kDWModelPath = @"/Library/Application Support/DepthWallpa
 // Biên dịch .mlmodel trên máy (lần đầu) rồi giữ bản .mlmodelc trong Caches
 + (nullable NSURL *)compiledModelURL {
     NSFileManager *fm = [NSFileManager defaultManager];
-    if (![fm fileExistsAtPath:kDWModelPath]) return nil;
+    if (![fm fileExistsAtPath:kDWModelPath]) { gLastStatus = @"không có file model"; return nil; }
 
     NSURL *caches = [[fm URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask] firstObject];
     NSURL *dir = [caches URLByAppendingPathComponent:@"DepthWallpaper" isDirectory:YES];
@@ -22,9 +24,9 @@ static NSString *const kDWModelPath = @"/Library/Application Support/DepthWallpa
 
     NSError *err = nil;
     NSURL *tmp = [MLModel compileModelAtURL:[NSURL fileURLWithPath:kDWModelPath] error:&err];
-    if (!tmp) return nil;
+    if (!tmp) { gLastStatus = [NSString stringWithFormat:@"biên dịch lỗi: %@", err]; return nil; }
     [fm removeItemAtURL:dest error:nil];
-    if (![fm moveItemAtURL:tmp toURL:dest error:&err]) return nil;
+    if (![fm moveItemAtURL:tmp toURL:dest error:&err]) { gLastStatus = [NSString stringWithFormat:@"move lỗi: %@", err]; return nil; }
     return dest;
 }
 
@@ -36,10 +38,15 @@ static NSString *const kDWModelPath = @"/Library/Application Support/DepthWallpa
         if (!url) return;
         NSError *err = nil;
         MLModel *ml = [MLModel modelWithContentsOfURL:url error:&err];
-        if (!ml) return;
+        if (!ml) { gLastStatus = [NSString stringWithFormat:@"nạp MLModel lỗi: %@", err]; return; }
         model = [VNCoreMLModel modelForMLModel:ml error:&err];
+        gLastStatus = model ? @"đã nạp model" : [NSString stringWithFormat:@"VNCoreMLModel lỗi: %@", err];
     });
     return model;
+}
+
++ (NSString *)lastStatus {
+    return gLastStatus;
 }
 
 + (BOOL)isModelAvailable {
@@ -118,7 +125,8 @@ static CGImageRef DWMaskFromMultiArray(MLMultiArray *arr, NSInteger cls) {
     VNCoreMLRequest *req = [[VNCoreMLRequest alloc] initWithModel:model];
     req.imageCropAndScaleOption = VNImageCropAndScaleOptionScaleFill;
     VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:image options:@{}];
-    if (![handler performRequests:@[req] error:nil]) return NULL;
+    NSError *perr = nil;
+    if (![handler performRequests:@[req] error:&perr]) { gLastStatus = [NSString stringWithFormat:@"suy luận lỗi: %@", perr]; return NULL; }
 
     size_t W = CGImageGetWidth(image), H = CGImageGetHeight(image);
 

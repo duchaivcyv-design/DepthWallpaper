@@ -6,7 +6,8 @@
 
 static const CGFloat kDWMaxSide = 1024.0;
 // Tăng số này mỗi khi đổi thuật toán mask, để bỏ cache mask cũ.
-static NSString *const kDWAlgoVersion = @"v16";
+static NSString *const kDWAlgoVersion = @"v17";
+static NSString *gMaskSource = @"chưa có";
 static const double kDWMinCoverage = 0.005;
 
 @interface DWDepthEngine (Internal)
@@ -204,10 +205,12 @@ static const double kDWMinCoverage = 0.005;
 
     CGImageRef small = [self downscaledCGImage:full width:w height:h];
     if (!small) return nil;
+    gMaskSource = @"không có";
 
     CGImageRef maskSmall = NULL;
     if (@available(iOS 17.0, *)) {
         maskSmall = [self maskWithInstanceMask:small];
+        if (maskSmall) gMaskSource = @"instance";
         if (maskSmall && [self coverageOfCGImage:maskSmall] < kDWMinCoverage) {
             CGImageRelease(maskSmall); maskSmall = NULL;
         }
@@ -215,18 +218,21 @@ static const double kDWMinCoverage = 0.005;
     if (!maskSmall) {
         // Model do người dùng cung cấp (nếu có)
         maskSmall = [DWModelSegmenter maskForCGImage:small];
+        if (maskSmall) gMaskSource = @"model";
         if (maskSmall && [self coverageOfCGImage:maskSmall] < kDWMinCoverage) {
             CGImageRelease(maskSmall); maskSmall = NULL;
         }
     }
     if (!maskSmall) {
         maskSmall = [self maskWithPersonSegmentation:small];
+        if (maskSmall) gMaskSource = @"person";
         if (maskSmall && [self coverageOfCGImage:maskSmall] < kDWMinCoverage) {
             CGImageRelease(maskSmall); maskSmall = NULL;
         }
     }
     if (!maskSmall) {
         maskSmall = [self maskWithSaliency:small threshold:0.3];
+        if (maskSmall) gMaskSource = @"saliency";
         if (maskSmall && [self coverageOfCGImage:maskSmall] < kDWMinCoverage) {
             CGImageRelease(maskSmall); maskSmall = NULL;
         }
@@ -270,6 +276,10 @@ static const double kDWMinCoverage = 0.005;
     UIImage *img = [UIImage imageWithCGImage:out];
     CGImageRelease(out);
     return img;
+}
+
++ (NSString *)lastMaskSource {
+    return gMaskSource;
 }
 
 + (double)coverageOfMask:(UIImage *)mask {

@@ -116,3 +116,8 @@ Cài đặt → DepthWallpaper → Xem thử chiều sâu trên ảnh: chọn �
 - Đầu ra xác suất >= 0.5 là chủ thể. Đây là phần mặc định, không cần cấu hình thêm.
 - Thông báo ghi công: U²-Net, Apache-2.0, https://github.com/xuebinqin/U-2-Net
 - Model đã được đưa vào `layout/Library/Application Support/DepthWallpaper/` nên `.deb` tự cài đúng đường dẫn. Không cần chép tay.
+
+## Cập nhật v17: chẩn đoán
+- lock.txt ghi thêm "Nguồn mask" (model / instance / person / saliency / không có) và trạng thái nạp model (có file, biên dịch, nạp, suy luận).
+- Cache mask đổi sang v17.
+- Nếu log vẫn cho thấy 5.7% và nguồn "saliency" hoặc "không có", nghĩa là model chưa được nạp.

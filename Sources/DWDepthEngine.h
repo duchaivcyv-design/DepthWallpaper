@@ -12,6 +12,9 @@ NS_ASSUME_NONNULL_BEGIN
                        data:(NSData *)data
                  completion:(void (^)(UIImage * _Nullable mask))completion;
 
+/// Nguồn mask lần tính gần nhất: model / instance / person / saliency / không có.
++ (NSString *)lastMaskSource;
+
 /// Tỉ lệ diện tích mask đang là chủ thể (0..1). Dùng để báo lỗi khi mask rỗng hoặc phủ toàn bộ.
 + (double)coverageOfMask:(UIImage *)mask;
 
