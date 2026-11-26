@@ -12,6 +12,9 @@ NS_ASSUME_NONNULL_BEGIN
                        data:(NSData *)data
                  completion:(void (^)(UIImage * _Nullable mask))completion;
 
+/// Tỉ lệ diện tích mask đang là chủ thể (0..1). Dùng để báo lỗi khi mask rỗng hoặc phủ toàn bộ.
++ (double)coverageOfMask:(UIImage *)mask;
+
 /// Cắt chủ thể ra PNG có alpha bằng mask. Trả về nil nếu thất bại.
 + (nullable UIImage *)cutoutFromImage:(UIImage *)image mask:(UIImage *)mask;
 

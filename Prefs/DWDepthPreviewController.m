@@ -264,8 +264,15 @@ didFinishPickingMediaWithInfo:(NSDictionary<UIImagePickerControllerInfoKey,id> *
             return;
         }
         self.displayMask = DWScaledImage(mask, small);
+        double cov = [DWDepthEngine coverageOfMask:self.displayMask];
         [self applySubject];
-        self.status.text = [NSString stringWithFormat:@"Tách xong trong %.1f giây. Kéo đồng hồ để di chuyển, kéo góc trắng lên xuống để chỉnh độ dày.", dt];
+        if (cov < 0.01) {
+            self.status.text = [NSString stringWithFormat:@"Mask gần như rỗng (%.1f%%), không có chủ thể để tách. Thử ảnh khác có vật nổi rõ.", cov * 100];
+        } else if (cov > 0.95) {
+            self.status.text = [NSString stringWithFormat:@"Mask phủ gần hết ảnh (%.0f%%), hiệu ứng sẽ yếu. Thử ảnh khác.", cov * 100];
+        } else {
+            self.status.text = [NSString stringWithFormat:@"Tách xong trong %.1f giây, chủ thể chiếm %.0f%% ảnh. Kéo đồng hồ để di chuyển, kéo góc trắng lên xuống để chỉnh độ dày.", dt, cov * 100];
+        }
     }];
 }
 

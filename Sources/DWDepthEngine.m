@@ -4,6 +4,8 @@
 #import <objc/message.h>
 
 static const CGFloat kDWMaxSide = 1024.0;
+// Tăng số này mỗi khi đổi thuật toán mask, để bỏ cache mask cũ.
+static NSString *const kDWAlgoVersion = @"v8";
 
 @implementation DWDepthEngine
 
@@ -88,11 +90,35 @@ static const CGFloat kDWMaxSide = 1024.0;
     if (!pb) return NULL;
 
     CIImage *ci = [CIImage imageWithCVPixelBuffer:pb];
-    CIFilter *f = [CIFilter filterWithName:@"CIColorControls"];
-    [f setValue:ci forKey:kCIInputImageKey];
-    [f setValue:@(4.0) forKey:kCIInputContrastKey];
-    CIImage *boosted = f.outputImage ?: ci;
-    return [[CIContext contextWithOptions:nil] createCGImage:boosted fromRect:boosted.extent];
+    CIContext *ctx = [CIContext contextWithOptions:nil];
+
+    // Lấy giá trị lớn nhất của heatmap
+    CIFilter *maxF = [CIFilter filterWithName:@"CIAreaMaximum"];
+    [maxF setValue:ci forKey:kCIInputImageKey];
+    [maxF setValue:[CIVector vectorWithCGRect:ci.extent] forKey:kCIInputExtentKey];
+    CIImage *maxImg = maxF.outputImage;
+    if (!maxImg) return NULL;
+    uint8_t px[4] = {0, 0, 0, 0};
+    [ctx render:maxImg toBitmap:px rowBytes:4 bounds:CGRectMake(0, 0, 1, 1)
+         format:kCIFormatRGBA8 colorSpace:nil];
+    double peak = MAX(1.0, (double)MAX(px[0], MAX(px[1], px[2])));
+
+    // Chuẩn hoá về [0,1] theo peak, rồi ngưỡng 50% (contrast mạnh quanh 0.5)
+    CGFloat k = (CGFloat)(255.0 / peak);
+    CIFilter *norm = [CIFilter filterWithName:@"CIColorMatrix"];
+    [norm setValue:ci forKey:kCIInputImageKey];
+    [norm setValue:[CIVector vectorWithX:k Y:0 Z:0 W:0] forKey:@"inputRVector"];
+    [norm setValue:[CIVector vectorWithX:0 Y:0 Z:0 W:0] forKey:@"inputGVector"];
+    [norm setValue:[CIVector vectorWithX:0 Y:0 Z:0 W:0] forKey:@"inputBVector"];
+    [norm setValue:[CIVector vectorWithX:0 Y:0 Z:0 W:1] forKey:@"inputAVector"];
+    [norm setValue:[CIVector vectorWithX:0 Y:0 Z:0 W:0] forKey:@"inputBiasVector"];
+    CIImage *scaled = norm.outputImage ?: ci;
+
+    CIFilter *thr = [CIFilter filterWithName:@"CIColorControls"];
+    [thr setValue:scaled forKey:kCIInputImageKey];
+    [thr setValue:@(6.0) forKey:kCIInputContrastKey];
+    CIImage *boosted = thr.outputImage ?: scaled;
+    return [ctx createCGImage:boosted fromRect:boosted.extent];
 }
 
 // Thu nhỏ ảnh để tách nhanh
@@ -150,8 +176,9 @@ static const CGFloat kDWMaxSide = 1024.0;
 - (void)subjectMaskForImage:(UIImage *)image
                        data:(NSData *)data
                  completion:(void (^)(UIImage * _Nullable))completion {
+    NSString *key = [NSString stringWithFormat:@"%@-%@", kDWAlgoVersion, [DWDepthEngine keyForData:data]];
     NSURL *file = [[DWDepthEngine cacheDirectory] URLByAppendingPathComponent:
-                   [[DWDepthEngine keyForData:data] stringByAppendingString:@".png"]];
+                   [key stringByAppendingString:@".png"]];
 
     UIImage *cached = [UIImage imageWithContentsOfFile:file.path];
     if (cached) {
@@ -171,6 +198,22 @@ static const CGFloat kDWMaxSide = 1024.0;
 
 + (UIImage *)cutoutFromImage:(UIImage *)image mask:(UIImage *)mask {
     return [self cutoutFromImage:image mask:mask thickness:0.0];
+}
+
++ (double)coverageOfMask:(UIImage *)mask {
+    if (!mask.CGImage) return 0.0;
+    const size_t n = 64;
+    uint8_t *buf = calloc(n * n, 1);
+    CGColorSpaceRef gray = CGColorSpaceCreateDeviceGray();
+    CGContextRef ctx = CGBitmapContextCreate(buf, n, n, 8, n, gray, kCGImageAlphaNone);
+    CGColorSpaceRelease(gray);
+    if (!ctx) { free(buf); return 0.0; }
+    CGContextDrawImage(ctx, CGRectMake(0, 0, n, n), mask.CGImage);
+    CGContextRelease(ctx);
+    size_t on = 0;
+    for (size_t i = 0; i < n * n; i++) if (buf[i] > 127) on++;
+    free(buf);
+    return (double)on / (double)(n * n);
 }
 
 + (UIImage *)cutoutFromImage:(UIImage *)image mask:(UIImage *)mask thickness:(double)thickness {

@@ -63,3 +63,16 @@ Cài đặt → DepthWallpaper → Xem thử chiều sâu trên ảnh: chọn �
 - Góc trắng trên đồng hồ: kéo lên xuống để tăng/giảm độ dày chủ thể. Giá trị lưu vào `subjectThickness` (-1 đến +1), tweak cũng dùng giá trị này.
 - Thanh trượt "Độ dày chủ thể" trong Cài đặt chỉnh cùng giá trị.
 - Log class thật (iOS 16.7.16) xác nhận: SBFWallpaperView, SBFLockScreenDateView, CSCoverSheetViewController, PRPosterDepthEffectConfiguration. Selector của menu Depth vẫn chưa xác nhận được.
+
+## Cập nhật v8
+- Cache mask có phiên bản thuật toán (v8): mask cũ sai không còn được dùng lại. Đây là nguyên nhân có khả năng khiến hiệu ứng không hiện.
+- Saliency được chuẩn hoá theo giá trị lớn nhất, ngưỡng 50%.
+- Trang xem thử báo tỉ lệ diện tích chủ thể, và báo rõ khi mask rỗng hoặc phủ gần hết ảnh.
+
+## Cập nhật v9: chiều sâu trên màn khóa thật
+- Khi cover sheet (CSCoverSheetViewController) hiện, tweak chụp wallpaper (SBFWallpaperView) và chụp ra ảnh.
+- Tách chủ thể từ ảnh chụp, rồi đặt lớp: nền (ảnh chụp) -> đồng hồ (SBFLockScreenDateView) -> chủ thể. Wallpaper gốc được ẩn.
+- Khi màn khóa ẩn, tweak trả đồng hồ về chỗ cũ và hiện lại wallpaper gốc.
+- Mọi bước ghi vào /var/mobile/Library/Logs/DepthWallpaper/lock.txt để biết nơi lỗi.
+- Hiệu ứng trên trang trình chỉnh sửa (Xem thử) vẫn có.
+- Chưa hoạt động nếu wallpaper được vẽ ở process khác (PosterBoard). Khi đó lock.txt sẽ ghi "Chụp wallpaper thất bại".
