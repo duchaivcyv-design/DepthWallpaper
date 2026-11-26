@@ -10,6 +10,8 @@ extern "C" {
 BOOL   DWPrefBool(NSString *key, BOOL defaultValue);
 double DWPrefDouble(NSString *key, double defaultValue);
 void   DWPrefSetDouble(NSString *key, double value);
+/// Xóa cache và đồng bộ lại từ đĩa. Gọi khi nhận thông báo reload hoặc sau khi ghi.
+void   DWPrefsInvalidate(void);
 
 #ifdef __cplusplus
 }

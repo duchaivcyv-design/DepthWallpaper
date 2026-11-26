@@ -6,7 +6,7 @@
 
 static const CGFloat kDWMaxSide = 1024.0;
 // Tăng số này mỗi khi đổi thuật toán mask, để bỏ cache mask cũ.
-static NSString *const kDWAlgoVersion = @"v13";
+static NSString *const kDWAlgoVersion = @"v16";
 static const double kDWMinCoverage = 0.005;
 
 @interface DWDepthEngine (Internal)
@@ -251,7 +251,7 @@ static const double kDWMinCoverage = 0.005;
                 }
             }
         }
-        if (!maskSmall) maskSmall = box ? CGImageRetain(box) : NULL;
+        // Không dùng hộp thuần: hộp tạo vệt xám trên màn hình. Chỉ nhận khi giao với saliency đủ lớn.
         if (box) CGImageRelease(box);
         if (sal) CGImageRelease(sal);
     }

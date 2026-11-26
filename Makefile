@@ -9,7 +9,7 @@ TWEAK_NAME = DepthWallpaper
 
 DepthWallpaper_FILES = Tweak.xm $(wildcard Sources/*.m)
 DepthWallpaper_CFLAGS = -fobjc-arc -Wno-deprecated-declarations
-DepthWallpaper_FRAMEWORKS = UIKit Vision CoreImage QuartzCore
+DepthWallpaper_FRAMEWORKS = UIKit Vision CoreImage CoreML QuartzCore
 
 include $(THEOS_MAKE_PATH)/tweak.mk
 

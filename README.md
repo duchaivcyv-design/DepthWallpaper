@@ -98,3 +98,21 @@ Cài đặt → DepthWallpaper → Xem thử chiều sâu trên ảnh: chọn �
 - Model phải trả về ảnh (pixel buffer), trắng là chủ thể. Model dạng MLMultiArray (như DeepLabV3 chưa tách lớp) cần bước argmax riêng, chưa có trong bản này.
 - Nếu không có model, tweak dùng chuỗi Vision cũ.
 - Prefs bundle đã thêm DWModelSegmenter.m để tránh lỗi link.
+
+## Cập nhật v14
+- Sửa đơ khi vuốt: DWPrefs có cache trong bộ nhớ, không còn đọc đĩa mỗi lần gọi. Cache chỉ làm mới khi nhận thông báo reload.
+- Ghi log màn khóa chạy ở luồng nền, không chặn main thread.
+- Bỏ fallback hình chữ nhật thuần để không còn vệt xám. Chỉ nhận mask khi giao với saliency đủ lớn.
+- Cache mask đổi sang v14.
+
+## Cập nhật v15
+- Đọc đầu ra MLMultiArray của model (nhãn lớp hoặc xác suất theo lớp, lấy argmax). Lớp mặc định 15 (người theo PASCAL VOC). Có thể đổi bằng khóa `segClass` trong prefs.
+- Makefile tweak thêm CoreML để link DWModelSegmenter.
+- Vẫn cần file model `DWSubject.mlmodelc` do bạn cung cấp.
+
+## Cập nhật v16: U²-Net đã chuyển sang Core ML
+- Model: U²-Net (Xuebin Qin et al., Apache License 2.0), trọng số lấy từ rembg (v0.0.0 release, MIT). Chuyển đổi bằng `tools/convert_u2net.py`, nén fp16 bằng `tools/to_fp16.py`, kiểm tra bằng `tools/verify_spec_numpy.py` (sai số tối đa 0.02, trung bình 4e-5 so với onnxruntime).
+- File model: `DWSubject.mlmodel` (88 MB), đặt tại `/Library/Application Support/DepthWallpaper/DWSubject.mlmodel`. Tweak biên dịch một lần rồi lưu vào Caches.
+- Đầu ra xác suất >= 0.5 là chủ thể. Đây là phần mặc định, không cần cấu hình thêm.
+- Thông báo ghi công: U²-Net, Apache-2.0, https://github.com/xuebinqin/U-2-Net
+- Model đã được đưa vào `layout/Library/Application Support/DepthWallpaper/` nên `.deb` tự cài đúng đường dẫn. Không cần chép tay.

@@ -21,20 +21,30 @@ static BOOL gJitterDisabledByUs = NO;
 
 #pragma mark - Log (để đọc lỗi trên máy)
 
+static dispatch_queue_t gLogQueue;
+
 static void DWLockLog(NSString *line) {
     NSLog(@"[DepthWallpaper][lock] %@", line);
-    NSString *dir = @"/var/mobile/Library/Logs/DepthWallpaper";
-    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
-    NSString *path = [dir stringByAppendingPathComponent:@"lock.txt"];
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        gLogQueue = dispatch_queue_create("dw.log", DISPATCH_QUEUE_SERIAL);
+    });
     NSString *entry = [NSString stringWithFormat:@"%@ %@\n", [NSDate date], line];
-    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
-    if (!fh) {
-        [entry writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        return;
-    }
-    [fh seekToEndOfFile];
-    [fh writeData:[entry dataUsingEncoding:NSUTF8StringEncoding]];
-    [fh closeFile];
+    // Ghi file ở luồng nền, không chặn main thread
+    dispatch_async(gLogQueue, ^{
+        NSString *dir = @"/var/mobile/Library/Logs/DepthWallpaper";
+        [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES
+                                                   attributes:nil error:nil];
+        NSString *path = [dir stringByAppendingPathComponent:@"lock.txt"];
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
+        if (!fh) {
+            [entry writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            return;
+        }
+        [fh seekToEndOfFile];
+        [fh writeData:[entry dataUsingEncoding:NSUTF8StringEncoding]];
+        [fh closeFile];
+    });
 }
 
 #pragma mark - Tiện ích view
@@ -247,13 +257,10 @@ static void DWAttachLockDepth(UIViewController *vc) {
 // Áp lại cài đặt ngay khi công tắc thay đổi
 static void DWReloadFromPrefs(CFNotificationCenterRef center, void *observer,
                               CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    CFPreferencesAppSynchronize((__bridge CFStringRef)DW_PREFS_SUITE);
+    DWPrefsInvalidate();
     dispatch_async(dispatch_get_main_queue(), ^{
         if (!DWPrefBool(@"enabled", YES) || !DWPrefBool(@"depthWallpaper", YES)) {
             DWTearDownLock();
-        } else if (gCoverCls && !gSubjectWindow) {
-            // Áp dụng ngay nếu màn khóa đang hiện: không cần khóa lại máy
-            DWLockLog(@"Nhận lệnh bật lại từ Cài đặt");
         }
     });
 }
