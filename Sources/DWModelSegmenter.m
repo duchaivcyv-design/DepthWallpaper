@@ -1,13 +1,22 @@
 #import "DWModelSegmenter.h"
 #import "DWPrefs.h"
-#import <Vision/Vision.h>
 #import <CoreML/CoreML.h>
+#import <CoreImage/CoreImage.h>
+#import <CoreVideo/CoreVideo.h>
 #import <dlfcn.h>
-// Model U²-Net (Apache-2.0) đã chuyển sang Core ML bằng tools/convert_u2net.py.
-// Đầu ra: MLMultiArray [1,1,320,320] là xác suất chủ thể.
-// FIX: không hard-code đường rootful /Library. Build rootless cài vào /var/jb,
-// roothide dùng jbroot ngẫu nhiên -> dò theo thư mục chứa dylib + đường phổ biến.
+
+// Model U²-Net (Apache-2.0), input RGB 320x320, output tên "1959".
+// Spec khai output Array(1,320,320) (rank 3) nhưng mạng thực tế trả [1,1,320,320] (rank 4);
+// VNCoreMLTransform kiểm tra shape và báo "must be rank 3, got rank 4" -> request fail.
+// Sửa v2: bỏ Vision, gọi thẳng MLModel predictionFromFeatures; CoreML không validate
+// shape output như Vision nên chạy được, rồi tự đọc MLMultiArray (rank 4 đã hỗ trợ).
+
 static NSString *gLastStatus = @"chưa thử";
+
+static NSString *DWShortText(NSString *s) {
+    if (!s) return @"(không mô tả)";
+    return s.length > 180 ? [s substringToIndex:180] : s;
+}
 
 // <root>/Library/MobileSubstrate/DynamicLibraries/<tweak>.dylib -> <root>/Library/Application Support/DepthWallpaper
 static NSArray<NSString *> *DWModelDirectories(void) {
@@ -27,7 +36,6 @@ static NSArray<NSString *> *DWModelDirectories(void) {
     return dirs;
 }
 
-// Trả về đường dẫn .mlmodel thô; nếu thấy sẵn .mlmodelc thì ghi ra *outCompiledDir và trả nil.
 static NSString *DWExistingRawModelPath(NSString **outCompiledDir) {
     NSFileManager *fm = [NSFileManager defaultManager];
     for (NSString *dir in DWModelDirectories()) {
@@ -42,7 +50,17 @@ static NSString *DWExistingRawModelPath(NSString **outCompiledDir) {
     return nil;
 }
 
+static CIContext *DWModelCIContext(void) {
+    static CIContext *ctx;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        ctx = [CIContext contextWithOptions:@{kCIContextUseSoftwareRenderer: @NO}];
+    });
+    return ctx;
+}
+
 @implementation DWModelSegmenter
+
 // Biên dịch .mlmodel trên máy (lần đầu) rồi giữ bản .mlmodelc trong Caches
 + (nullable NSURL *)compiledModelURL {
     NSFileManager *fm = [NSFileManager defaultManager];
@@ -57,31 +75,36 @@ static NSString *DWExistingRawModelPath(NSString **outCompiledDir) {
     if ([fm fileExistsAtPath:dest.path]) return dest;
     NSError *err = nil;
     NSURL *tmp = [MLModel compileModelAtURL:[NSURL fileURLWithPath:rawPath] error:&err];
-    if (!tmp) { gLastStatus = [NSString stringWithFormat:@"biên dịch lỗi: %@", err]; return nil; }
+    if (!tmp) { gLastStatus = [NSString stringWithFormat:@"biên dịch lỗi: %@", DWShortText(err.description)]; return nil; }
     [fm removeItemAtURL:dest error:nil];
-    if (![fm moveItemAtURL:tmp toURL:dest error:&err]) { gLastStatus = [NSString stringWithFormat:@"move lỗi: %@", err]; return nil; }
+    if (![fm moveItemAtURL:tmp toURL:dest error:&err]) {
+        gLastStatus = [NSString stringWithFormat:@"move lỗi: %@", DWShortText(err.description)]; return nil;
+    }
     return dest;
 }
-+ (nullable VNCoreMLModel *)loadedModel {
-    static VNCoreMLModel *model;
+
++ (nullable MLModel *)loadedMLModel {
+    static MLModel *ml;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         NSURL *url = [self compiledModelURL];
         if (!url) return;
         NSError *err = nil;
-        MLModel *ml = [MLModel modelWithContentsOfURL:url error:&err];
-        if (!ml) { gLastStatus = [NSString stringWithFormat:@"nạp MLModel lỗi: %@", err]; return; }
-        model = [VNCoreMLModel modelForMLModel:ml error:&err];
-        gLastStatus = model ? @"đã nạp model" : [NSString stringWithFormat:@"VNCoreMLModel lỗi: %@", err];
+        ml = [MLModel modelWithContentsOfURL:url error:&err];
+        gLastStatus = ml ? @"đã nạp model"
+                         : [NSString stringWithFormat:@"nạp MLModel lỗi: %@", DWShortText(err.description)];
     });
-    return model;
+    return ml;
 }
+
 + (NSString *)lastStatus {
     return gLastStatus;
 }
+
 + (BOOL)isModelAvailable {
-    return [self loadedModel] != nil;
+    return [self loadedMLModel] != nil;
 }
+
 static double DWValueAt(MLMultiArray *arr, NSInteger linear) {
     if (arr.dataType == MLMultiArrayDataTypeFloat32) {
         return ((const float *)arr.dataPointer)[linear];
@@ -94,8 +117,9 @@ static double DWValueAt(MLMultiArray *arr, NSInteger linear) {
     }
     return 0.0;
 }
-// Chuyển MLMultiArray đầu ra thành mask gray (255 = chủ thể).
-// - Xác suất 1 kênh (U²-Net): pixel = 255 nếu xác suất >= 0.5.
+
+// Chuyển MLMultiArray đầu ra thành mask gray nhị phân (255 = chủ thể).
+// - Probability [1,H,W] / [1,1,H,W]: pixel = 255 nếu xác suất >= 0.5.
 // - Nhãn lớp [H,W]: pixel = 255 nếu nhãn == cls.
 // - Nhiều kênh [C,H,W]: argmax rồi so với cls.
 static CGImageRef DWMaskFromMultiArray(MLMultiArray *arr, NSInteger cls) {
@@ -143,39 +167,65 @@ static CGImageRef DWMaskFromMultiArray(MLMultiArray *arr, NSInteger cls) {
     free(buf);
     return out;
 }
+
 + (nullable CGImageRef)maskForCGImage:(CGImageRef)image {
-    VNCoreMLModel *model = [self loadedModel];
-    if (!model || !image) return NULL;
-    VNCoreMLRequest *req = [[VNCoreMLRequest alloc] initWithModel:model];
-    req.imageCropAndScaleOption = VNImageCropAndScaleOptionScaleFill;
-    VNImageRequestHandler *handler = [[VNImageRequestHandler alloc] initWithCGImage:image options:@{}];
-    NSError *perr = nil;
-    if (![handler performRequests:@[req] error:&perr]) { gLastStatus = [NSString stringWithFormat:@"suy luận lỗi: %@", perr]; return NULL; }
-    size_t W = CGImageGetWidth(image), H = CGImageGetHeight(image);
-    for (id r in req.results) {
-        if ([r isKindOfClass:[VNPixelBufferObservation class]]) {
-            CIImage *ci = [CIImage imageWithCVPixelBuffer:((VNPixelBufferObservation *)r).pixelBuffer];
-            CGFloat sx = (CGFloat)W / ci.extent.size.width;
-            CGFloat sy = (CGFloat)H / ci.extent.size.height;
-            ci = [ci imageByApplyingTransform:CGAffineTransformMakeScale(sx, sy)];
-            return [[CIContext contextWithOptions:nil] createCGImage:ci fromRect:CGRectMake(0, 0, W, H)];
+    MLModel *ml = [self loadedMLModel];
+    if (!ml || !image) return NULL;
+    const NSInteger SZ = 320;
+    CVPixelBufferRef pb = NULL;
+    CVReturn cv = CVPixelBufferCreate(kCFAllocatorDefault, SZ, SZ, kCVPixelFormatType_32BGRA, NULL, &pb);
+    if (cv != kCVReturnSuccess || !pb) { gLastStatus = @"không tạo được pixel buffer 320"; return NULL; }
+    @autoreleasepool {
+        CIImage *ci = [CIImage imageWithCGImage:image];
+        CGFloat iw = (CGFloat)CGImageGetWidth(image);
+        CGFloat ih = (CGFloat)CGImageGetHeight(image);
+        // ScaleFill: phóng to vừa khung 320x320 rồi cắt giữa, giữ tỷ lệ chủ thể.
+        CGFloat s = MAX(SZ / MAX(1.0, iw), SZ / MAX(1.0, ih));
+        CGAffineTransform t = CGAffineTransformMakeTranslation((SZ - iw * s) / 2.0, (SZ - ih * s) / 2.0);
+        t = CGAffineTransformScale(t, s, s);
+        ci = [ci imageByApplyingTransform:t];
+        CGColorSpaceRef rgb = CGColorSpaceCreateDeviceRGB();
+        NSError *renderErr = nil;
+        [DWModelCIContext() render:ci toCVPixelBuffer:pb bounds:CGRectMake(0, 0, SZ, SZ)
+                        colorSpace:rgb error:&renderErr];
+        CGColorSpaceRelease(rgb);
+
+        MLFeatureValue *fv = [MLFeatureValue featureValueWithPixelBuffer:pb];
+        MLMutableDictionaryFeatureProvider *provider =
+            [[MLMutableDictionaryFeatureProvider alloc] initWithDictionary:@{ @"input.1": fv }];
+        NSError *err = nil;
+        id<MLFeatureProvider> out = [ml predictionFromFeatures:provider error:&err];
+        if (!out) {
+            gLastStatus = [NSString stringWithFormat:@"suy luận lỗi: %@",
+                                                    DWShortText(err.localizedDescription ?: err.description)];
+            CVPixelBufferRelease(pb);
+            return NULL;
         }
-    }
-    NSInteger cls = (NSInteger)DWPrefDouble(@"segClass", 15);
-    for (id r in req.results) {
-        if ([r isKindOfClass:[VNCoreMLFeatureValueObservation class]]) {
-            MLMultiArray *arr = ((VNCoreMLFeatureValueObservation *)r).featureValue.multiArrayValue;
-            if (!arr) continue;
-            CGImageRef small = DWMaskFromMultiArray(arr, cls);
-            if (!small) continue;
-            CIImage *ci = [CIImage imageWithCGImage:small];
-            CGImageRelease(small);
-            CGFloat sx = (CGFloat)W / ci.extent.size.width;
-            CGFloat sy = (CGFloat)H / ci.extent.size.height;
-            ci = [ci imageByApplyingTransform:CGAffineTransformMakeScale(sx, sy)];
-            return [[CIContext contextWithOptions:nil] createCGImage:ci fromRect:CGRectMake(0, 0, W, H)];
+        MLMultiArray *arr = nil;
+        MLFeatureValue *ov = [out featureValueForName:@"1959"];
+        if (ov.multiArrayValue) {
+            arr = ov.multiArrayValue;
+        } else {
+            for (NSString *name in out.featureNames) {
+                MLFeatureValue *v = [out featureValueForName:name];
+                if (v.multiArrayValue) { arr = v.multiArrayValue; break; }
+            }
         }
+        if (!arr) {
+            gLastStatus = @"model không trả multiArray";
+            CVPixelBufferRelease(pb);
+            return NULL;
+        }
+        NSInteger cls = (NSInteger)DWPrefDouble(@"segClass", 15);
+        CGImageRef mask = DWMaskFromMultiArray(arr, cls);
+        CVPixelBufferRelease(pb);
+        if (mask) {
+            gLastStatus = @"model OK (dự luận trực tiếp)";
+        } else {
+            gLastStatus = @"model ra mask rỗng";
+        }
+        return mask;
     }
-    return NULL;
 }
+
 @end
